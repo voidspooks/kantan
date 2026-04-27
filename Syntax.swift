@@ -1,0 +1,34 @@
+import AppKit
+
+// MARK: - Syntax dispatch
+
+enum Syntax: Int, CaseIterable {
+    case ruby  = 0
+    case yaml  = 1
+    case swift = 2
+
+    var displayName: String {
+        switch self {
+        case .ruby:  return "Ruby"
+        case .yaml:  return "YAML"
+        case .swift: return "Swift"
+        }
+    }
+
+    static func from(extension ext: String) -> Syntax? {
+        switch ext.lowercased() {
+        case "rb":             return .ruby
+        case "yaml", "yml":    return .yaml
+        case "swift":          return .swift
+        default:               return nil
+        }
+    }
+
+    func highlight(_ storage: NSTextStorage) {
+        switch self {
+        case .ruby:  RubyHighlighter.highlight(storage)
+        case .yaml:  YAMLHighlighter.highlight(storage)
+        case .swift: SwiftHighlighter.highlight(storage)
+        }
+    }
+}

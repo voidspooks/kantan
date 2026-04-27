@@ -12,7 +12,7 @@ The rule is plain: if a feature does not earn its place, it does not belong.
 
 ## What it is
 
-- A native macOS editor, written in a single Swift file.
+- A native macOS editor, written in Swift.
 - Dark theme. Monospaced. Line numbers.
 - Open, edit, save. Find. Undo.
 - Ruby syntax highlighting.
@@ -37,4 +37,4 @@ make run
 
 ## Source
 
-One file: `Kantan.swift`.
+Entry point: `main.swift`.

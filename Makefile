@@ -1,5 +1,5 @@
 TARGET   := Kantan
-SRC      := Kantan.swift
+SRCS     := $(shell find . -name '*.swift' -not -path './.*')
 SWIFTC   := swiftc
 SWIFTFLAGS := -O
 
@@ -7,8 +7,8 @@ SWIFTFLAGS := -O
 
 all: $(TARGET)
 
-$(TARGET): $(SRC)
-	$(SWIFTC) $(SWIFTFLAGS) -o $(TARGET) $(SRC)
+$(TARGET): $(SRCS)
+	$(SWIFTC) $(SWIFTFLAGS) -o $(TARGET) $(SRCS)
 
 run: $(TARGET)
 	./$(TARGET)
