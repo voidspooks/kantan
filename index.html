@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kantan 簡単 — a small text editor for macOS</title>
+<meta name="description" content="Kantan is a minimalist native macOS text editor, written in a single Swift file.">
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --fg: #d4d4d4;
+    --dim: #888;
+    --accent: #e0a060;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 4rem 1.5rem 6rem;
+  }
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 500;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--accent);
+    margin: 2.5rem 0 0.75rem;
+  }
+  p { margin: 0.75rem 0; }
+  .tagline {
+    color: var(--dim);
+    margin-bottom: 0;
+  }
+  ul {
+    padding-left: 1.25rem;
+    margin: 0.5rem 0;
+  }
+  li { margin: 0.25rem 0; }
+  pre {
+    background: #111;
+    border: 1px solid #2a2a2a;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+  }
+  code { color: var(--accent); }
+  pre code { color: var(--fg); }
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+  a:hover { border-bottom-color: var(--accent); }
+  footer {
+    color: var(--dim);
+    font-size: 0.85rem;
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #2a2a2a;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kantan 簡単</h1>
+  <p class="tagline">A small text editor for macOS.</p>
+  <p><em>Kantan</em> (簡単) means <em>simple</em>.</p>
+
+  <h2>Philosophy</h2>
+  <p>Editors are born light and grow heavy. Features arrive, settings multiply, and what was once quick becomes sluggish. Kantan resists this.</p>
+  <p>The rule is plain: if a feature does not earn its place, it does not belong.</p>
+
+  <h2>What it is</h2>
+  <ul>
+    <li>A native macOS editor, written in a single Swift file.</li>
+    <li>Dark theme. Monospaced. Line numbers.</li>
+    <li>Open, edit, save. Find. Undo.</li>
+    <li>Ruby syntax highlighting.</li>
+  </ul>
+
+  <h2>What it is not</h2>
+  <ul>
+    <li>A platform.</li>
+    <li>A plugin host.</li>
+    <li>A configuration exercise.</li>
+  </ul>
+
+  <h2>Build</h2>
+  <pre><code>make</code></pre>
+
+  <h2>Run</h2>
+  <pre><code>make run</code></pre>
+
+  <h2>Source</h2>
+  <p>One file: <code>Kantan.swift</code>. <a href="https://github.com/voidspooks/kantan">View on GitHub →</a></p>
+
+  <footer>
+    MIT licensed.
+  </footer>
+</main>
+</body>
+</html>
