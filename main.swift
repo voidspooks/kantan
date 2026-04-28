@@ -20,10 +20,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showAboutPanel(_ sender: Any?) {
+        let url = URL(string: "https://voidspooks.github.io/kantan")!
+        let credits = NSMutableAttributedString(
+            string: "voidspooks.github.io/kantan",
+            attributes: [
+                .link: url,
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+            ])
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Kantan",
             .applicationVersion: App.nameJapanese,
             .version: App.version,
+            .credits: credits,
         ])
     }
 
