@@ -39,10 +39,38 @@ final class DocumentTab {
 
 final class EditorTextView: NSTextView {
     var onBecomeFirstResponder: (() -> Void)?
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result { onBecomeFirstResponder?() }
         return result
+    }
+
+    /// Paint a full-width bar behind the caret's current line before NSTextView
+    /// renders glyphs and temporary attributes. Drawn here (rather than via a
+    /// temp attribute) so the highlight extends the full width of the view,
+    /// not just the typeset extent of the line.
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let lm = layoutManager,
+              let container = textContainer else { return }
+        let sel = selectedRange()
+        guard sel.length == 0 else { return }
+
+        let nsText = string as NSString
+        let lineRange = nsText.lineRange(for: NSRange(location: min(sel.location, nsText.length),
+                                                      length: 0))
+        let glyphRange = lm.glyphRange(forCharacterRange: lineRange, actualCharacterRange: nil)
+        var lineRect = lm.boundingRect(forGlyphRange: glyphRange, in: container)
+        // Trim a few points off the left edge so the bar sits just to the
+        // right of where a caret at col 1 lands, rather than extending past it.
+        let leftInset: CGFloat = 4
+        lineRect.origin.x = bounds.minX + leftInset
+        lineRect.size.width = bounds.width - leftInset
+        lineRect = lineRect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+
+        Theme.lineHighlight.setFill()
+        lineRect.intersection(rect).fill()
     }
 }
 
@@ -310,15 +338,25 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         }
         tab.textStorage.delegate = self
 
+        if syntaxHighlightingEnabled, let syntax = tab.activeSyntax {
+            syntax.highlight(tab.textStorage)
+        }
+
+        // Force the layout manager to lay out the entire document and resize
+        // the text view to match. NSTextView lays out lazily by default, which
+        // means the scroll view caps you at the partially-laid-out portion
+        // until you scroll into the rest. Doing it up front makes scrolling
+        // and the saved scrollY restore behave deterministically.
+        if let lm = textView.layoutManager, let container = textView.textContainer {
+            lm.ensureLayout(for: container)
+        }
+        textView.sizeToFit()
+
         textView.setSelectedRange(tab.selectedRange)
         if let scrollView = textView.enclosingScrollView {
             var origin = scrollView.contentView.bounds.origin
             origin.y = tab.scrollY
             scrollView.contentView.bounds.origin = origin
-        }
-
-        if syntaxHighlightingEnabled, let syntax = tab.activeSyntax {
-            syntax.highlight(tab.textStorage)
         }
 
         gutterView.setLineChanges(tab.lineChanges)
@@ -487,6 +525,10 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     func textViewDidChangeSelection(_ notification: Notification) {
         updateCursorPositionLabel()
         updateWordHighlights()
+        // Force a redraw so the current-line bar follows the caret. The
+        // textView's automatic invalidation only covers the immediate caret
+        // rect, not the full-width line bar behind it.
+        textView.needsDisplay = true
     }
 
     // MARK: - Word-under-caret highlighting
@@ -702,18 +744,28 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         let indentUnit = cfg.unitString
 
         // Smart split: when the caret sits exactly between an opener and its
-        // matching closer (e.g. `{|}`), pressing Enter pushes the closer down
-        // to its own line aligned with the opener and leaves the caret on an
-        // indented blank line between them.
-        if selRange.length == 0, let opener = opener, cursor < nsText.length {
-            let closer: unichar
-            switch opener {
-            case "{": closer = 0x7D
-            case "[": closer = 0x5D
-            case "(": closer = 0x29
-            default:  closer = 0
+        // matching closer (e.g. `{|}`, or `<div>|</div>` in HTML/XML),
+        // pressing Enter pushes the closer down to its own line aligned with
+        // the opener and leaves the caret on an indented blank line between
+        // them.
+        if selRange.length == 0 {
+            var bracketSplit = false
+            if let opener = opener, cursor < nsText.length {
+                let closer: unichar
+                switch opener {
+                case "{": closer = 0x7D
+                case "[": closer = 0x5D
+                case "(": closer = 0x29
+                default:  closer = 0
+                }
+                bracketSplit = closer != 0 && nsText.character(at: cursor) == closer
             }
-            if closer != 0, nsText.character(at: cursor) == closer {
+
+            let syntax = activeTab?.activeSyntax
+            let tagSplit = (syntax == .html || syntax == .xml)
+                && tagPairAroundCaret(at: cursor, in: nsText) != nil
+
+            if bracketSplit || tagSplit {
                 let prefix = "\n" + leading + indentUnit
                 let suffix = "\n" + leading
                 textView.insertText(prefix + suffix, replacementRange: selRange)
@@ -728,6 +780,72 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
             insertion += indentUnit
         }
         textView.insertText(insertion, replacementRange: selRange)
+    }
+
+    /// Detect whether `location` sits exactly between a matching pair of HTML/
+    /// XML tags, e.g. `<div>|</div>`. Returns the tag name on a match (case
+    /// preserved from the opening tag) or nil if the surrounding text isn't a
+    /// matched pair. Comparison of the closing tag is case-insensitive so
+    /// `<DIV></div>` still smart-splits.
+    private func tagPairAroundCaret(at location: Int, in nsText: NSString) -> String? {
+        // Char to the immediate left must be the '>' that closes an opening tag.
+        guard location > 0, nsText.character(at: location - 1) == 0x3E else { return nil }
+
+        // Walk back from before the '>' to find the matching '<' without
+        // crossing another '>' first.
+        var i = location - 2
+        while i >= 0 {
+            let c = nsText.character(at: i)
+            if c == 0x3E { return nil }
+            if c == 0x3C { break }
+            i -= 1
+        }
+        guard i >= 0, nsText.character(at: i) == 0x3C else { return nil }
+
+        let nameStart = i + 1
+        guard nameStart < location - 1 else { return nil }
+        let firstChar = nsText.character(at: nameStart)
+        // Skip closing/comment/PI starts.
+        if firstChar == 0x2F || firstChar == 0x21 || firstChar == 0x3F { return nil }
+        guard let firstScalar = UnicodeScalar(firstChar),
+              CharacterSet.letters.contains(firstScalar) else { return nil }
+
+        var nameEnd = nameStart
+        while nameEnd < location - 1 {
+            let c = nsText.character(at: nameEnd)
+            guard let scalar = UnicodeScalar(c) else { break }
+            if CharacterSet.alphanumerics.contains(scalar)
+                || c == 0x2D /* - */
+                || c == 0x5F /* _ */
+                || c == 0x3A /* : */ {
+                nameEnd += 1
+            } else {
+                break
+            }
+        }
+        guard nameEnd > nameStart else { return nil }
+
+        // Skip self-closing forms — `<foo/>` shouldn't smart-split.
+        var k = location - 2
+        while k >= nameEnd {
+            let c = nsText.character(at: k)
+            if c == 0x20 || c == 0x09 { k -= 1; continue }
+            if c == 0x2F { return nil }
+            break
+        }
+
+        let openName = nsText.substring(with: NSRange(location: nameStart,
+                                                      length: nameEnd - nameStart))
+
+        // Forward: text starting at `location` must be `</openName>`.
+        let needed = "</\(openName)>"
+        let neededLength = (needed as NSString).length
+        guard location + neededLength <= nsText.length else { return nil }
+        let forward = nsText.substring(with: NSRange(location: location, length: neededLength))
+        if forward.caseInsensitiveCompare(needed) == .orderedSame {
+            return openName
+        }
+        return nil
     }
 
     // MARK: - NSTextStorageDelegate

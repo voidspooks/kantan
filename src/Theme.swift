@@ -16,6 +16,10 @@ enum Theme {
     /// the caret is touching. Slightly lighter than `selection` so the two
     /// don't blur together when the user makes a real selection.
     static let wordHighlight = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
+    /// Full-width bar drawn behind the line containing the caret. Darker than
+    /// `wordHighlight` so the line bar reads as a subtle ambient hint while
+    /// the word highlight stays the more prominent foreground accent.
+    static let lineHighlight = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
 
     static let gutterBackground = NSColor(red: 0.165, green: 0.165, blue: 0.180, alpha: 1.0)
     static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
