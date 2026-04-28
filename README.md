@@ -4,6 +4,8 @@ A small text editor for macOS.
 
 *Kantan* (簡単) means *simple*.
 
+![Kantan screenshot](screenshot.png)
+
 ## Philosophy
 
 Editors are born light and grow heavy. Features arrive, settings multiply, and what was once quick becomes sluggish. Kantan resists this.
