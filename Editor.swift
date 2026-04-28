@@ -139,6 +139,48 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         return false
     }
 
+    private static let autoPairs: [Character: Character] = [
+        "{": "}", "[": "]", "(": ")",
+        "`": "`", "\"": "\"", "'": "'"
+    ]
+
+    func textView(_ textView: NSTextView,
+                  shouldChangeTextIn affectedCharRange: NSRange,
+                  replacementString: String?) -> Bool {
+        guard let str = replacementString, str.count == 1,
+              let opener = str.first,
+              let closer = Editor.autoPairs[opener] else { return true }
+
+        let nsText = textView.string as NSString
+
+        // Quotes: skip pairing when the cursor is touching a word character.
+        // Keeps things like `don't` and `it's` from becoming `don''t`.
+        if opener == "\"" || opener == "'" {
+            if affectedCharRange.location > 0 {
+                let prev = nsText.character(at: affectedCharRange.location - 1)
+                if let scalar = UnicodeScalar(prev),
+                   CharacterSet.alphanumerics.contains(scalar) || prev == 0x5F {
+                    return true
+                }
+            }
+        }
+
+        let middle = affectedCharRange.length > 0
+            ? nsText.substring(with: affectedCharRange)
+            : ""
+
+        let insertion = "\(opener)\(middle)\(closer)"
+        textView.insertText(insertion, replacementRange: affectedCharRange)
+
+        // Empty selection → cursor between the pair.
+        // Non-empty selection → re-select the wrapped text so further typing replaces it.
+        let selStart = affectedCharRange.location + 1
+        let selLength = (middle as NSString).length
+        textView.setSelectedRange(NSRange(location: selStart, length: selLength))
+
+        return false
+    }
+
     private func insertNewlineWithIndent(in textView: NSTextView) {
         let nsText = textView.string as NSString
         let selRange = textView.selectedRange()
