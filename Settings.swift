@@ -25,6 +25,12 @@ syntax_highlighting:
     number:    "#b5cea8"
     constant:  "#4ec9b0"
     attribute: "#9cdcfe"
+  javascript:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
 """
 
 // MARK: - Settings (settings.yaml on disk)
