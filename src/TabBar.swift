@@ -16,6 +16,7 @@ final class TabBarView: NSView {
 
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    var onReorder: ((_ from: Int, _ to: Int) -> Void)?
 
     private let stack = NSStackView()
     private let scroll = NSScrollView()
@@ -91,18 +92,136 @@ final class TabBarView: NSView {
         for v in stack.arrangedSubviews { stack.removeView(v) }
         for (i, item) in items.enumerated() {
             let view = TabItemView(item: item, isActive: i == activeIndex, font: tabFont)
-            view.onClick = { [weak self] in self?.onSelect?(i) }
-            view.onClose = { [weak self] in self?.onClose?(i) }
+            view.onMouseDown = { [weak self] tab, event in
+                self?.handleTabMouseDown(tab: tab, event: event)
+            }
+            view.onClose = { [weak self] in
+                guard let self = self,
+                      let idx = self.stack.arrangedSubviews.firstIndex(of: view) else { return }
+                self.onClose?(idx)
+            }
             stack.addArrangedSubview(view)
         }
         needsDisplay = true
+    }
+
+    /// Threshold (in points) the cursor must travel before a press becomes a
+    /// drag. Below this, the gesture is treated as a click.
+    private static let dragThreshold: CGFloat = 4
+
+    /// Distinguishes a click from a drag-reorder. Runs a modal event loop and
+    /// either reorders tabs in place (firing onReorder on release) or fires
+    /// onSelect for a plain click. While dragging, the tab is translated via a
+    /// layer transform so it visually tracks the cursor; neighbors swap
+    /// underneath it as the cursor crosses their midpoints.
+    private func handleTabMouseDown(tab: TabItemView, event: NSEvent) {
+        guard let window = self.window,
+              let originalIndex = stack.arrangedSubviews.firstIndex(of: tab) else { return }
+
+        let downInBar = convert(event.locationInWindow, from: nil)
+        let initialMidX = tab.frame.midX
+        var didDrag = false
+
+        tab.wantsLayer = true
+
+        trackingLoop: while true {
+            guard let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) else { continue }
+            switch next.type {
+            case .leftMouseDragged:
+                let pointInBar = convert(next.locationInWindow, from: nil)
+                if !didDrag {
+                    if abs(pointInBar.x - downInBar.x) < TabBarView.dragThreshold &&
+                       abs(pointInBar.y - downInBar.y) < TabBarView.dragThreshold {
+                        continue
+                    }
+                    didDrag = true
+                    // Lift the dragged tab above its neighbors so the swapping
+                    // siblings slide underneath it rather than over.
+                    tab.layer?.zPosition = 1
+                }
+                let dragOffset = pointInBar.x - downInBar.x
+                let desiredMidX = initialMidX + dragOffset
+
+                swapNeighbor(of: tab, towardCenterX: desiredMidX)
+                stack.layoutSubtreeIfNeeded()
+
+                // Visual position = layout position + this transform. Recomputing
+                // each tick keeps the cursor "glued" to the tab even after swaps
+                // shift the tab into a different slot.
+                let translateBy = desiredMidX - tab.frame.midX
+                tab.layer?.setAffineTransform(CGAffineTransform(translationX: translateBy, y: 0))
+            case .leftMouseUp:
+                tab.layer?.zPosition = 0
+                tab.layer?.setAffineTransform(.identity)
+                if didDrag {
+                    let finalIndex = stack.arrangedSubviews.firstIndex(of: tab) ?? originalIndex
+                    if finalIndex != originalIndex {
+                        onReorder?(originalIndex, finalIndex)
+                    } else {
+                        onSelect?(originalIndex)
+                    }
+                } else {
+                    onSelect?(originalIndex)
+                }
+                break trackingLoop
+            default:
+                break
+            }
+        }
+    }
+
+    /// If `desiredCenterX` has crossed the midpoint of an adjacent arranged
+    /// subview, swap `tab` past it. At most one swap per call so the stack
+    /// animates one neighbor at a time even when the cursor jumps.
+    private func swapNeighbor(of tab: TabItemView, towardCenterX desiredCenterX: CGFloat) {
+        let arranged = stack.arrangedSubviews
+        guard let currentIndex = arranged.firstIndex(of: tab) else { return }
+
+        var neighbor: NSView?
+        var newIndex = currentIndex
+
+        if currentIndex > 0 {
+            let left = arranged[currentIndex - 1]
+            if desiredCenterX < left.frame.midX {
+                neighbor = left
+                newIndex = currentIndex - 1
+            }
+        }
+        if neighbor == nil, currentIndex < arranged.count - 1 {
+            let right = arranged[currentIndex + 1]
+            if desiredCenterX > right.frame.midX {
+                neighbor = right
+                newIndex = currentIndex + 1
+            }
+        }
+        guard let movedNeighbor = neighbor else { return }
+
+        let oldNeighborMinX = movedNeighbor.frame.minX
+        stack.removeArrangedSubview(tab)
+        stack.insertArrangedSubview(tab, at: newIndex)
+        stack.layoutSubtreeIfNeeded()
+        slideAnimation(view: movedNeighbor, fromDeltaX: oldNeighborMinX - movedNeighbor.frame.minX)
+    }
+
+    /// Visually slide `view` from `fromDeltaX` (relative to its now-current
+    /// layout position) back to identity. Used to animate neighbors that have
+    /// just been displaced by a tab swap.
+    private func slideAnimation(view: NSView, fromDeltaX dx: CGFloat) {
+        guard dx != 0 else { return }
+        view.wantsLayer = true
+        let anim = CABasicAnimation(keyPath: "transform.translation.x")
+        anim.fromValue = dx
+        anim.toValue = 0
+        anim.duration = 0.18
+        anim.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        view.layer?.add(anim, forKey: "tabSlide")
     }
 }
 
 // MARK: - Single tab cell
 
 final class TabItemView: NSView {
-    var onClick: (() -> Void)?
+    var onMouseDown: ((TabItemView, NSEvent) -> Void)?
     var onClose: (() -> Void)?
 
     private let item: TabBarItem
@@ -197,7 +316,7 @@ final class TabItemView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        onClick?()
+        onMouseDown?(self, event)
     }
 
     @objc private func handleClose() {

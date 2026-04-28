@@ -222,10 +222,12 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     private let branchContainer = NSView()
     private let branchIcon = NSImageView()
     private let branchLabel = NSTextField(labelWithString: "")
+    private let cursorPositionLabel = NSTextField(labelWithString: "")
     private var dividerHeight: NSLayoutConstraint!
     private var branchContainerHeight: NSLayoutConstraint!
     private var branchIconWidth: NSLayoutConstraint!
     private var branchIconHeight: NSLayoutConstraint!
+    private var cursorPositionText: String = ""
 
     // Header: black bar with folder/repo name at the top of the sidebar.
     private let headerContainer = NSView()
@@ -339,8 +341,11 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             branchIconHeight,
 
             branchLabel.leadingAnchor.constraint(equalTo: branchIcon.trailingAnchor, constant: 7),
-            branchLabel.trailingAnchor.constraint(equalTo: branchContainer.trailingAnchor, constant: -8),
+            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: cursorPositionLabel.leadingAnchor, constant: -8),
             branchLabel.centerYAnchor.constraint(equalTo: branchContainer.centerYAnchor),
+
+            cursorPositionLabel.trailingAnchor.constraint(equalTo: branchContainer.trailingAnchor, constant: -8),
+            cursorPositionLabel.centerYAnchor.constraint(equalTo: branchContainer.centerYAnchor),
         ])
     }
 
@@ -507,16 +512,27 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.textColor = Theme.sidebarText
         branchContainer.addSubview(branchLabel)
+
+        cursorPositionLabel.translatesAutoresizingMaskIntoConstraints = false
+        cursorPositionLabel.drawsBackground = false
+        cursorPositionLabel.isBordered = false
+        cursorPositionLabel.isEditable = false
+        cursorPositionLabel.lineBreakMode = .byClipping
+        cursorPositionLabel.textColor = Theme.sidebarText
+        cursorPositionLabel.alignment = .right
+        cursorPositionLabel.setContentHuggingPriority(.required, for: .horizontal)
+        cursorPositionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        branchContainer.addSubview(cursorPositionLabel)
     }
 
     /// Show/hide the divider + branch row, refresh the icon (so it tracks font
     /// size changes) and label. Called after any git refresh and any font change.
     private func updateBranchFooter() {
         let branch = gitStatus.currentBranch
-        let visible = branch != nil
+        let visible = branch != nil || !cursorPositionText.isEmpty
 
         // Collapsing the heights to 0 (rather than just hiding) lets the file
-        // list reclaim the footer's space when the project isn't a git repo.
+        // list reclaim the footer's space when there's nothing to show.
         dividerHeight.constant = visible ? 1 : 0
         branchContainerHeight.constant = visible ? max(iconSize + 10, 24) : 0
         branchIconWidth.constant = 0
@@ -525,6 +541,15 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         branchIcon.image = nil
         branchLabel.font = cellFont
         branchLabel.stringValue = branch != nil ? "⎇ \(branch!)" : ""
+        cursorPositionLabel.font = cellFont
+        cursorPositionLabel.stringValue = cursorPositionText
+    }
+
+    /// Update the cursor-position readout shown on the right side of the footer.
+    /// Pass an empty string to hide it.
+    func setCursorPosition(_ text: String) {
+        cursorPositionText = text
+        updateBranchFooter()
     }
 
     /// Refresh only the directory containing `url`, preserving expansion of

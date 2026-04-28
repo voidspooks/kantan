@@ -112,7 +112,10 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         textView.backgroundColor = Theme.background
         textView.textColor = Theme.foreground
         textView.insertionPointColor = Theme.cursor
-        textView.selectedTextAttributes = [.backgroundColor: Theme.selection]
+        textView.selectedTextAttributes = [
+            .backgroundColor: Theme.selection,
+            .foregroundColor: Theme.selectionText,
+        ]
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -144,6 +147,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         tabBar.translatesAutoresizingMaskIntoConstraints = false
         tabBar.onSelect = { [weak self] index in self?.switchToTab(at: index) }
         tabBar.onClose  = { [weak self] index in self?.closeTab(at: index) }
+        tabBar.onReorder = { [weak self] from, to in self?.reorderTab(from: from, to: to) }
 
         let editorPane = EditorPaneView(tabBar: tabBar, gutterContainer: container)
         editorPane.translatesAutoresizingMaskIntoConstraints = false
@@ -172,6 +176,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         workspaceView.sidebar.setRowFont(editorFont)
         workspaceView.tabBar.setFont(editorFont)
         applyLineNumbersVisibility()
+        updateCursorPositionLabel()
 
         window.contentView = workspaceView
         window.makeKeyAndOrderFront(nil)
@@ -268,6 +273,26 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         switchToTab(at: next)
     }
 
+    /// Move a tab to a new position. Adjusts `activeTabIndex` so the same
+    /// document stays selected after the reorder.
+    private func reorderTab(from: Int, to: Int) {
+        guard from >= 0, from < tabs.count, to >= 0, to < tabs.count, from != to else { return }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
+
+        if let active = activeTabIndex {
+            if active == from {
+                activeTabIndex = to
+            } else if from < active && active <= to {
+                activeTabIndex = active - 1
+            } else if to <= active && active < from {
+                activeTabIndex = active + 1
+            }
+        }
+
+        rebuildTabBar()
+    }
+
     private func switchToTab(at index: Int, force: Bool = false) {
         guard index >= 0, index < tabs.count else { return }
         if !force, activeTabIndex == index { return }
@@ -305,6 +330,27 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         gutterView?.refresh()
         refreshLanguageMenuChecks()
         rebuildTabBar()
+        updateCursorPositionLabel()
+    }
+
+    /// Compute line/column from the current insertion point and push the
+    /// formatted readout into the sidebar footer.
+    private func updateCursorPositionLabel() {
+        let nsText = textView.string as NSString
+        let location = min(textView.selectedRange().location, nsText.length)
+        let lineRange = nsText.lineRange(for: NSRange(location: location, length: 0))
+        let textBefore = nsText.substring(to: lineRange.location) as NSString
+        var line = 1
+        var idx = 0
+        while idx < textBefore.length {
+            let r = textBefore.range(of: "\n", options: .literal,
+                                     range: NSRange(location: idx, length: textBefore.length - idx))
+            if r.location == NSNotFound { break }
+            line += 1
+            idx = r.location + r.length
+        }
+        let column = location - lineRange.location + 1
+        workspaceView?.sidebar.setCursorPosition("Ln \(line), Col \(column)")
     }
 
     private func rebuildTabBar() {
@@ -324,6 +370,10 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
     func undoManager(for view: NSTextView) -> UndoManager? {
         return activeTab?.undoManager
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        updateCursorPositionLabel()
     }
 
     private static let autoPairs: [Character: Character] = [

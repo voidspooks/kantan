@@ -10,7 +10,8 @@ enum Theme {
 
     static let foreground = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
     static let cursor     = NSColor.white
-    static let selection  = NSColor(red: 0.16,  green: 0.31,  blue: 0.50,  alpha: 1.0)
+    static let selection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
+    static let selectionText = NSColor.white
 
     static let gutterBackground = NSColor(red: 0.165, green: 0.165, blue: 0.180, alpha: 1.0)
     static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
