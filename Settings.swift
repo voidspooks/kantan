@@ -3,6 +3,8 @@ import AppKit
 // MARK: - Default settings.yaml (written to disk on first launch)
 
 let defaultSettingsYAML = """
+line_numbers: true
+
 syntax_highlighting:
   ruby:
     keyword:  "#c685c0"
@@ -41,6 +43,8 @@ enum SettingsStore {
         return base.appendingPathComponent("Kantan/settings.yaml")
     }
 
+    static var showLineNumbers: Bool = true
+
     /// Ensure the settings directory and file exist on disk; then load and apply the colors.
     static func bootstrap() {
         let url = fileURL
@@ -63,6 +67,76 @@ enum SettingsStore {
         for (language, colors) in parsed {
             Theme.apply(language, colors)
         }
+        showLineNumbers = parseTopLevelBool("line_numbers", in: text) ?? true
+    }
+
+    /// Update `showLineNumbers` and persist the new value to settings.yaml.
+    /// Replaces an existing top-level `line_numbers:` line (preserving any trailing comment),
+    /// or inserts one at the top of the file if absent.
+    static func setLineNumbers(_ value: Bool) {
+        showLineNumbers = value
+        let url = fileURL
+        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let updated = rewriteTopLevelBool("line_numbers", value: value, in: existing)
+        do {
+            try updated.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            FileHandle.standardError.write(Data("Kantan: settings persist failed: \(error.localizedDescription)\n".utf8))
+        }
+    }
+
+    static func rewriteTopLevelBool(_ key: String, value: Bool, in text: String) -> String {
+        let prefix = "\(key):"
+        let newLine = "\(key): \(value)"
+        var lines = text.components(separatedBy: "\n")
+        for i in 0..<lines.count {
+            let raw = lines[i]
+            var stripped = raw
+            if let hash = stripped.firstIndex(of: "#") {
+                stripped = String(stripped[..<hash])
+            }
+            let trimmed = stripped.trimmingCharacters(in: .whitespaces)
+            let indent = raw.prefix { $0 == " " }.count
+            guard indent == 0, trimmed.hasPrefix(prefix) else { continue }
+            if let hash = raw.firstIndex(of: "#") {
+                lines[i] = "\(newLine) \(raw[hash...])"
+            } else {
+                lines[i] = newLine
+            }
+            return lines.joined(separator: "\n")
+        }
+        // Not present: insert at the top, with a blank line before existing non-empty content.
+        var prefixLines = [newLine]
+        if let first = lines.first, !first.trimmingCharacters(in: .whitespaces).isEmpty {
+            prefixLines.append("")
+        }
+        return (prefixLines + lines).joined(separator: "\n")
+    }
+
+    /// Read a top-level `key: <bool>` line. Accepts true/false/yes/no (case-insensitive).
+    /// Returns nil if the key is absent or the value is unrecognized.
+    static func parseTopLevelBool(_ key: String, in text: String) -> Bool? {
+        let prefix = "\(key):"
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#") {
+                line = String(line[..<hash])
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+            guard indent == 0, trimmed.hasPrefix(prefix) else { continue }
+            let value = trimmed
+                .dropFirst(prefix.count)
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            switch value {
+            case "true", "yes":  return true
+            case "false", "no":  return false
+            default:             return nil
+            }
+        }
+        return nil
     }
 
     /// Tiny YAML reader for our fixed shape:

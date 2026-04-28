@@ -143,6 +143,7 @@ final class GutterContainerView: NSView {
     private let gutter: GutterView
     private let scroll: NSScrollView
     private let widthConstraint: NSLayoutConstraint
+    private var gutterVisible = true
 
     init(gutter: GutterView, scrollView: NSScrollView) {
         self.gutter = gutter
@@ -169,8 +170,20 @@ final class GutterContainerView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     func gutterDidRequestWidth(_ width: CGFloat) {
+        guard gutterVisible else { return }
         if abs(width - widthConstraint.constant) > 0.5 {
             widthConstraint.constant = width
+        }
+    }
+
+    func setGutterVisible(_ visible: Bool) {
+        if visible == gutterVisible { return }
+        gutterVisible = visible
+        gutter.isHidden = !visible
+        if visible {
+            gutter.refresh()
+        } else {
+            widthConstraint.constant = 0
         }
     }
 }

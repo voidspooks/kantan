@@ -20,6 +20,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         didSet { refreshLanguageMenuChecks() }
     }
     weak var syntaxHighlightingMenuItem: NSMenuItem?
+    weak var lineNumbersMenuItem: NSMenuItem?
     weak var languageMenu: NSMenu?
 
     override init() {
@@ -104,6 +105,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         }
 
         gutterView.refresh()
+        applyLineNumbersVisibility()
 
         window.contentView = workspaceView
         window.makeKeyAndOrderFront(nil)
@@ -240,6 +242,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
                 if syntaxHighlightingEnabled, let storage = textView.textStorage {
                     activeSyntax?.highlight(storage)
                 }
+                applyLineNumbersVisibility()
             }
         } catch {
             showError("Couldn't save file: \(error.localizedDescription)")
@@ -284,6 +287,21 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
 
     @objc func toggleSyntaxHighlighting(_ sender: Any?) {
         setSyntaxHighlighting(!syntaxHighlightingEnabled)
+    }
+
+    @objc func toggleLineNumbers(_ sender: Any?) {
+        let next = !SettingsStore.showLineNumbers
+        if currentURL == SettingsStore.fileURL {
+            SettingsStore.showLineNumbers = next
+        } else {
+            SettingsStore.setLineNumbers(next)
+        }
+        applyLineNumbersVisibility()
+    }
+
+    private func applyLineNumbersVisibility() {
+        workspaceView?.gutterContainer.setGutterVisible(SettingsStore.showLineNumbers)
+        lineNumbersMenuItem?.state = SettingsStore.showLineNumbers ? .on : .off
     }
 
     private func setSyntaxHighlighting(_ on: Bool) {

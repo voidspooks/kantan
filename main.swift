@@ -176,6 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSidebarItem.target = editor
         configMenu.addItem(refreshSidebarItem)
 
+        let lineNumbersItem = NSMenuItem(title: "Show Line Numbers",
+                                         action: #selector(Editor.toggleLineNumbers(_:)),
+                                         keyEquivalent: "L")
+        lineNumbersItem.target = editor
+        lineNumbersItem.keyEquivalentModifierMask = [.command, .shift]
+        lineNumbersItem.state = SettingsStore.showLineNumbers ? .on : .off
+        editor.lineNumbersMenuItem = lineNumbersItem
+        configMenu.addItem(lineNumbersItem)
+
         configItem.submenu = configMenu
         mainMenu.addItem(configItem)
 
