@@ -1,5 +1,7 @@
 # Kantan 簡単
 
+![Kantan](app.png)
+
 A small text editor for macOS.
 
 *Kantan* (簡単) means *simple*.
