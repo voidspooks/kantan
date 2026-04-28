@@ -21,6 +21,60 @@ indent:
   html:
     style: space
     width: 2
+  python:
+    style: space
+    width: 4
+  typescript:
+    style: space
+    width: 2
+  java:
+    style: space
+    width: 4
+  c:
+    style: space
+    width: 4
+  cpp:
+    style: space
+    width: 4
+  csharp:
+    style: space
+    width: 4
+  php:
+    style: space
+    width: 4
+  go:
+    style: tab
+    width: 1
+  rust:
+    style: space
+    width: 4
+  kotlin:
+    style: space
+    width: 4
+  sql:
+    style: space
+    width: 2
+  r:
+    style: space
+    width: 2
+  dart:
+    style: space
+    width: 2
+  scala:
+    style: space
+    width: 2
+  perl:
+    style: space
+    width: 4
+  lua:
+    style: space
+    width: 2
+  bash:
+    style: space
+    width: 2
+  markdown:
+    style: space
+    width: 2
 
 syntax_highlighting:
   ruby:
@@ -56,6 +110,129 @@ syntax_highlighting:
     string:    "#ce9178"
     comment:   "#6b9955"
     constant:  "#4ec9b0"
+  python:
+    keyword:   "#c685c0"
+    string:    "#ce9178"
+    comment:   "#6b9955"
+    number:    "#b5cea8"
+    constant:  "#4ec9b0"
+    decorator: "#9cdcfe"
+  typescript:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+  java:
+    keyword:    "#c685c0"
+    string:     "#ce9178"
+    comment:    "#6b9955"
+    number:     "#b5cea8"
+    constant:   "#4ec9b0"
+    annotation: "#9cdcfe"
+  c:
+    keyword:      "#c685c0"
+    string:       "#ce9178"
+    comment:      "#6b9955"
+    number:       "#b5cea8"
+    constant:     "#4ec9b0"
+    preprocessor: "#9cdcfe"
+  cpp:
+    keyword:      "#c685c0"
+    string:       "#ce9178"
+    comment:      "#6b9955"
+    number:       "#b5cea8"
+    constant:     "#4ec9b0"
+    preprocessor: "#9cdcfe"
+  csharp:
+    keyword:   "#c685c0"
+    string:    "#ce9178"
+    comment:   "#6b9955"
+    number:    "#b5cea8"
+    constant:  "#4ec9b0"
+    attribute: "#9cdcfe"
+  php:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+    variable: "#9cdcfe"
+  go:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+  rust:
+    keyword:   "#c685c0"
+    string:    "#ce9178"
+    comment:   "#6b9955"
+    number:    "#b5cea8"
+    constant:  "#4ec9b0"
+    attribute: "#9cdcfe"
+    macro:     "#569cd6"
+  kotlin:
+    keyword:    "#c685c0"
+    string:     "#ce9178"
+    comment:    "#6b9955"
+    number:     "#b5cea8"
+    constant:   "#4ec9b0"
+    annotation: "#9cdcfe"
+  sql:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+  r:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+  dart:
+    keyword:    "#c685c0"
+    string:     "#ce9178"
+    comment:    "#6b9955"
+    number:     "#b5cea8"
+    constant:   "#4ec9b0"
+    annotation: "#9cdcfe"
+  scala:
+    keyword:    "#c685c0"
+    string:     "#ce9178"
+    comment:    "#6b9955"
+    number:     "#b5cea8"
+    constant:   "#4ec9b0"
+    annotation: "#9cdcfe"
+  perl:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+    variable: "#9cdcfe"
+  lua:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+  bash:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    variable: "#9cdcfe"
+  markdown:
+    heading:    "#c685c0"
+    strong:     "#4ec9b0"
+    emphasis:   "#9cdcfe"
+    code:       "#ce9178"
+    link:       "#569cd6"
+    list:       "#c685c0"
+    blockquote: "#6b9955"
+    rule:       "#6b9955"
 """
 
 // MARK: - Indent config
@@ -123,6 +300,24 @@ enum SettingsStore {
         "swift":      IndentConfig(style: .space, width: 4),
         "javascript": IndentConfig(style: .space, width: 2),
         "html":       IndentConfig(style: .space, width: 2),
+        "python":     IndentConfig(style: .space, width: 4),
+        "typescript": IndentConfig(style: .space, width: 2),
+        "java":       IndentConfig(style: .space, width: 4),
+        "c":          IndentConfig(style: .space, width: 4),
+        "cpp":        IndentConfig(style: .space, width: 4),
+        "csharp":     IndentConfig(style: .space, width: 4),
+        "php":        IndentConfig(style: .space, width: 4),
+        "go":         IndentConfig(style: .tab,   width: 1),
+        "rust":       IndentConfig(style: .space, width: 4),
+        "kotlin":     IndentConfig(style: .space, width: 4),
+        "sql":        IndentConfig(style: .space, width: 2),
+        "r":          IndentConfig(style: .space, width: 2),
+        "dart":       IndentConfig(style: .space, width: 2),
+        "scala":      IndentConfig(style: .space, width: 2),
+        "perl":       IndentConfig(style: .space, width: 4),
+        "lua":        IndentConfig(style: .space, width: 2),
+        "bash":       IndentConfig(style: .space, width: 2),
+        "markdown":   IndentConfig(style: .space, width: 2),
     ]
     static var indentByLanguage: [String: IndentConfig] = defaultIndents
 

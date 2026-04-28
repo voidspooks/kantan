@@ -207,7 +207,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
         var insertion = "\n" + leading
         if opensBlock {
-            let key = activeSyntax?.displayName.lowercased() ?? ""
+            let key = activeSyntax?.key ?? ""
             let cfg = SettingsStore.indentByLanguage[key] ?? IndentConfig.fallback
             insertion += cfg.unitString
         }

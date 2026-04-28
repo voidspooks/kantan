@@ -4,12 +4,12 @@ import AppKit
 //
 // Hover-only overlay scroller: no track, just a slim translucent thumb that
 // fades in when the cursor enters the scroller strip and fades out when it leaves.
-// Visibility is driven by our own value rather than alphaValue so the system's
-// flash-on-scroll behavior never produces a visible flicker — drawKnobSlot is empty
-// and drawKnob is gated on visibility > 0.
+// The backing layer is forced to clear so the strip the scroller occupies takes
+// the surrounding pane's color rather than the layer's default fill.
 
 final class MinimalScroller: NSScroller {
     override class var isCompatibleWithOverlayScrollers: Bool { true }
+    override var isOpaque: Bool { false }
 
     private var trackingArea: NSTrackingArea?
     private var visibility: CGFloat = 0 {
@@ -20,12 +20,24 @@ final class MinimalScroller: NSScroller {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        scrollerStyle = .overlay
+        commonInit()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
         scrollerStyle = .overlay
+        wantsLayer = true
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.backgroundColor = NSColor.clear.cgColor
+        layer.isOpaque = false
+        return layer
     }
 
     override func updateTrackingAreas() {
