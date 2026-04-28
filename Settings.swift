@@ -66,6 +66,38 @@ struct IndentConfig {
     }
 }
 
+// MARK: - Session state (UserDefaults)
+
+/// Tracks what the user had open at last quit so we can restore it on launch.
+/// Lives in UserDefaults rather than settings.yaml because it's app state, not config.
+enum AppState {
+    private static let lastFileKey   = "kantan.lastFilePath"
+    private static let lastFolderKey = "kantan.lastFolderPath"
+
+    static var lastFile: URL? {
+        get { url(forKey: lastFileKey) }
+        set { setURL(newValue, forKey: lastFileKey) }
+    }
+
+    static var lastFolder: URL? {
+        get { url(forKey: lastFolderKey) }
+        set { setURL(newValue, forKey: lastFolderKey) }
+    }
+
+    private static func url(forKey key: String) -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: key) else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func setURL(_ url: URL?, forKey key: String) {
+        if let url = url {
+            UserDefaults.standard.set(url.path, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+}
+
 // MARK: - Settings (settings.yaml on disk)
 
 enum SettingsStore {

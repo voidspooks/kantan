@@ -7,7 +7,9 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
     var textView: NSTextView!
     var gutterView: GutterView!
     var workspaceView: WorkspaceView!
-    var currentURL: URL?
+    var currentURL: URL? {
+        didSet { AppState.lastFile = currentURL }
+    }
     var dirty = false
 
     static let minFontSize: CGFloat = 8
@@ -113,7 +115,18 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(textView)
 
+        restoreLastSession()
         updateTitle()
+    }
+
+    private func restoreLastSession() {
+        let fm = FileManager.default
+        if let folder = AppState.lastFolder, fm.fileExists(atPath: folder.path) {
+            setRootFolder(folder)
+        }
+        if let file = AppState.lastFile, fm.fileExists(atPath: file.path) {
+            loadFile(url: file)
+        }
     }
 
     // MARK: NSTextViewDelegate
@@ -210,8 +223,13 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
         if panel.runModal() == .OK, let url = panel.url {
-            workspaceView.setRootFolder(url)
+            setRootFolder(url)
         }
+    }
+
+    private func setRootFolder(_ url: URL?) {
+        workspaceView.setRootFolder(url)
+        AppState.lastFolder = url
     }
 
     @objc func toggleSidebar(_ sender: Any?) {
