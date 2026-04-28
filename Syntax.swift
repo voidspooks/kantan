@@ -7,6 +7,7 @@ enum Syntax: Int, CaseIterable {
     case yaml       = 1
     case swift      = 2
     case javascript = 3
+    case html       = 4
 
     var displayName: String {
         switch self {
@@ -14,6 +15,7 @@ enum Syntax: Int, CaseIterable {
         case .yaml:       return "YAML"
         case .swift:      return "Swift"
         case .javascript: return "JavaScript"
+        case .html:       return "HTML"
         }
     }
 
@@ -23,6 +25,7 @@ enum Syntax: Int, CaseIterable {
         case "yaml", "yml":        return .yaml
         case "swift":              return .swift
         case "js", "mjs", "cjs":   return .javascript
+        case "html", "htm":        return .html
         default:                   return nil
         }
     }
@@ -33,6 +36,7 @@ enum Syntax: Int, CaseIterable {
         case .yaml:       YAMLHighlighter.highlight(storage)
         case .swift:      SwiftHighlighter.highlight(storage)
         case .javascript: JavaScriptHighlighter.highlight(storage)
+        case .html:       HTMLHighlighter.highlight(storage)
         }
     }
 }

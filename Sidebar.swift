@@ -90,6 +90,8 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = Theme.sidebarBackground
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScroller = MinimalScroller()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
         NSLayoutConstraint.activate([

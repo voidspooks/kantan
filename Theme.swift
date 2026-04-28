@@ -59,6 +59,13 @@ enum Theme {
             "number":   dNumber,
             "constant": dConstant,
         ],
+        "html": [
+            "tag":       dKeyword,
+            "attribute": dVariable,
+            "string":    dString,
+            "comment":   dComment,
+            "constant":  dConstant,
+        ],
     ]
 
     static func color(_ language: String, _ token: String) -> NSColor {

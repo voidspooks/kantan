@@ -18,6 +18,9 @@ indent:
   javascript:
     style: space
     width: 2
+  html:
+    style: space
+    width: 2
 
 syntax_highlighting:
   ruby:
@@ -47,6 +50,12 @@ syntax_highlighting:
     comment:  "#6b9955"
     number:   "#b5cea8"
     constant: "#4ec9b0"
+  html:
+    tag:       "#c685c0"
+    attribute: "#9cdcfe"
+    string:    "#ce9178"
+    comment:   "#6b9955"
+    constant:  "#4ec9b0"
 """
 
 // MARK: - Indent config
@@ -113,6 +122,7 @@ enum SettingsStore {
         "yaml":       IndentConfig(style: .space, width: 2),
         "swift":      IndentConfig(style: .space, width: 4),
         "javascript": IndentConfig(style: .space, width: 2),
+        "html":       IndentConfig(style: .space, width: 2),
     ]
     static var indentByLanguage: [String: IndentConfig] = defaultIndents
 

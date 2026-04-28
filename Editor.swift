@@ -55,6 +55,8 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         scrollView.autoresizingMask = [.width, .height]
         scrollView.drawsBackground = true
         scrollView.backgroundColor = Theme.background
+        scrollView.scrollerStyle = .overlay
+        scrollView.verticalScroller = MinimalScroller()
 
         let contentSize = scrollView.contentSize
         textView = NSTextView(frame: NSRect(origin: .zero, size: contentSize))
