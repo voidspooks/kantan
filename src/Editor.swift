@@ -173,6 +173,24 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         tabBar.onTabDropOutsideBar = { [weak self] sourceIndex, windowPoint in
             return self?.onTabDropOutsideBar?(sourceIndex, windowPoint) ?? false
         }
+
+        // Refresh word-under-caret highlights when the visible region scrolls
+        // so off-screen-revealed instances pick up the highlight.
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(scrollViewBoundsChanged(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func scrollViewBoundsChanged(_ note: Notification) {
+        updateWordHighlights()
     }
 
     // MARK: - View configuration
@@ -307,6 +325,7 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         gutterView.refresh()
         rebuildTabBar()
         updateCursorPositionLabel()
+        updateWordHighlights()
         onActiveTabChanged?()
         onTitleStateChanged?()
     }
@@ -467,6 +486,74 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
 
     func textViewDidChangeSelection(_ notification: Notification) {
         updateCursorPositionLabel()
+        updateWordHighlights()
+    }
+
+    // MARK: - Word-under-caret highlighting
+
+    /// Recompute and apply the word-under-caret highlight across the visible
+    /// portion of the document. Cheap to call frequently — we clear all
+    /// background temporary attributes across the document and reapply
+    /// fresh ones, which avoids stale entries left behind when text edits
+    /// shift previous match ranges.
+    private func updateWordHighlights() {
+        guard let lm = textView.layoutManager else { return }
+
+        let nsText = textView.string as NSString
+        let docRange = NSRange(location: 0, length: nsText.length)
+        lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: docRange)
+
+        let sel = textView.selectedRange()
+        guard sel.length == 0 else { return }
+        guard let (word, _) = wordTouchingCaret(at: sel.location, in: nsText) else { return }
+
+        let visibleRange = visibleCharacterRange()
+        guard visibleRange.length > 0 else { return }
+
+        let pattern = "\\b" + NSRegularExpression.escapedPattern(for: word) + "\\b"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+
+        regex.enumerateMatches(in: textView.string, range: visibleRange) { match, _, _ in
+            guard let m = match else { return }
+            lm.addTemporaryAttribute(.backgroundColor,
+                                     value: Theme.wordHighlight,
+                                     forCharacterRange: m.range)
+        }
+    }
+
+    /// Find the run of A-Z/a-z characters touching the caret position, where
+    /// "touching" means either the character to the left or the character to
+    /// the right of the caret is a letter. Returns the word string and its
+    /// range, or nil if the caret isn't adjacent to a letter run.
+    private func wordTouchingCaret(at location: Int, in nsText: NSString) -> (String, NSRange)? {
+        let length = nsText.length
+        let leftIsLetter  = location > 0      && Pane.isAsciiLetter(nsText.character(at: location - 1))
+        let rightIsLetter = location < length && Pane.isAsciiLetter(nsText.character(at: location))
+        if !leftIsLetter && !rightIsLetter { return nil }
+
+        var start = location
+        while start > 0, Pane.isAsciiLetter(nsText.character(at: start - 1)) { start -= 1 }
+        var end = location
+        while end < length, Pane.isAsciiLetter(nsText.character(at: end)) { end += 1 }
+
+        let range = NSRange(location: start, length: end - start)
+        guard range.length > 0 else { return nil }
+        return (nsText.substring(with: range), range)
+    }
+
+    private static func isAsciiLetter(_ c: unichar) -> Bool {
+        return (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A)
+    }
+
+    /// The character range corresponding to the glyphs currently visible in
+    /// the text view's clip rect.
+    private func visibleCharacterRange() -> NSRange {
+        guard let lm = textView.layoutManager,
+              let container = textView.textContainer else {
+            return NSRange(location: 0, length: 0)
+        }
+        let glyphRange = lm.glyphRange(forBoundingRect: textView.visibleRect, in: container)
+        return lm.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
     }
 
     private static let autoPairs: [Character: Character] = [
@@ -478,12 +565,28 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
                   shouldChangeTextIn affectedCharRange: NSRange,
                   replacementString: String?) -> Bool {
         guard let str = replacementString, str.count == 1,
-              let opener = str.first,
-              let closer = Pane.autoPairs[opener] else { return true }
+              let ch = str.first else { return true }
 
         let nsText = textView.string as NSString
 
-        if opener == "\"" || opener == "'" {
+        // HTML/XML tag auto-close: when the user types '>' inside a markup
+        // document, finish the matching closing tag and leave the caret
+        // between the two. Void-element handling only applies to HTML.
+        let syntax = activeTab?.activeSyntax
+        if ch == ">", (syntax == .html || syntax == .xml),
+           let tagName = markupTagToAutoClose(at: affectedCharRange.location,
+                                              in: nsText,
+                                              applyVoidElementCheck: syntax == .html) {
+            let insertion = "></\(tagName)>"
+            textView.insertText(insertion, replacementRange: affectedCharRange)
+            let cursorAt = affectedCharRange.location + 1
+            textView.setSelectedRange(NSRange(location: cursorAt, length: 0))
+            return false
+        }
+
+        guard let closer = Pane.autoPairs[ch] else { return true }
+
+        if ch == "\"" || ch == "'" {
             if affectedCharRange.location > 0 {
                 let prev = nsText.character(at: affectedCharRange.location - 1)
                 if let scalar = UnicodeScalar(prev),
@@ -496,7 +599,7 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         let middle = affectedCharRange.length > 0
             ? nsText.substring(with: affectedCharRange)
             : ""
-        let insertion = "\(opener)\(middle)\(closer)"
+        let insertion = "\(ch)\(middle)\(closer)"
         textView.insertText(insertion, replacementRange: affectedCharRange)
 
         let selStart = affectedCharRange.location + 1
@@ -504,6 +607,70 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         textView.setSelectedRange(NSRange(location: selStart, length: selLength))
 
         return false
+    }
+
+    /// Void HTML elements that are never auto-closed (they have no closing tag).
+    private static let htmlVoidElements: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr"
+    ]
+
+    /// Inspect the text immediately to the left of `location` and decide
+    /// whether typing '>' there should auto-insert a matching `</tag>`.
+    /// Returns the tag name to close, or nil if the context isn't a normal
+    /// opening tag (closing tag, comment, doctype/PI, self-closing, or — for
+    /// HTML — a void element).
+    private func markupTagToAutoClose(at location: Int,
+                                      in nsText: NSString,
+                                      applyVoidElementCheck: Bool) -> String? {
+        // Walk back to the most recent '<' without crossing a '>' first.
+        var i = location - 1
+        while i >= 0 {
+            let c = nsText.character(at: i)
+            if c == 0x3E { return nil }  // '>'
+            if c == 0x3C { break }        // '<'
+            i -= 1
+        }
+        guard i >= 0, nsText.character(at: i) == 0x3C else { return nil }
+
+        let tagStart = i + 1
+        guard tagStart < location else { return nil }
+
+        let firstChar = nsText.character(at: tagStart)
+        // Skip closing tags </…, comments <!--, doctype/CDATA <!…, processing
+        // instructions <?…
+        if firstChar == 0x2F || firstChar == 0x21 || firstChar == 0x3F { return nil }
+
+        guard let firstScalar = UnicodeScalar(firstChar),
+              CharacterSet.letters.contains(firstScalar) else { return nil }
+
+        // Tag name: letters, digits, and '-' (custom elements).
+        var nameEnd = tagStart
+        while nameEnd < location {
+            let c = nsText.character(at: nameEnd)
+            guard let scalar = UnicodeScalar(c) else { break }
+            if CharacterSet.alphanumerics.contains(scalar) || c == 0x2D {
+                nameEnd += 1
+            } else {
+                break
+            }
+        }
+        let name = nsText.substring(with: NSRange(location: tagStart,
+                                                  length: nameEnd - tagStart)).lowercased()
+        if name.isEmpty { return nil }
+
+        // Self-closing form: a '/' immediately before the '>' we're typing
+        // (allowing trailing whitespace) means the tag is already terminated.
+        var j = location - 1
+        while j >= nameEnd {
+            let c = nsText.character(at: j)
+            if c == 0x20 || c == 0x09 { j -= 1; continue }
+            if c == 0x2F { return nil }
+            break
+        }
+
+        if applyVoidElementCheck, Pane.htmlVoidElements.contains(name) { return nil }
+        return name
     }
 
     private func insertNewlineWithIndent(in textView: NSTextView) {
@@ -522,17 +689,43 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         }
 
         let trimmed = beforeCursor.trimmingCharacters(in: .whitespaces)
-        let opensBlock: Bool
+        let opener: Character?
         switch trimmed.last {
-        case "{", "[", "(": opensBlock = true
-        default:            opensBlock = false
+        case "{": opener = "{"
+        case "[": opener = "["
+        case "(": opener = "("
+        default:  opener = nil
+        }
+
+        let key = activeTab?.activeSyntax?.key ?? ""
+        let cfg = SettingsStore.indentByLanguage[key] ?? IndentConfig.fallback
+        let indentUnit = cfg.unitString
+
+        // Smart split: when the caret sits exactly between an opener and its
+        // matching closer (e.g. `{|}`), pressing Enter pushes the closer down
+        // to its own line aligned with the opener and leaves the caret on an
+        // indented blank line between them.
+        if selRange.length == 0, let opener = opener, cursor < nsText.length {
+            let closer: unichar
+            switch opener {
+            case "{": closer = 0x7D
+            case "[": closer = 0x5D
+            case "(": closer = 0x29
+            default:  closer = 0
+            }
+            if closer != 0, nsText.character(at: cursor) == closer {
+                let prefix = "\n" + leading + indentUnit
+                let suffix = "\n" + leading
+                textView.insertText(prefix + suffix, replacementRange: selRange)
+                let caretAt = selRange.location + (prefix as NSString).length
+                textView.setSelectedRange(NSRange(location: caretAt, length: 0))
+                return
+            }
         }
 
         var insertion = "\n" + leading
-        if opensBlock {
-            let key = activeTab?.activeSyntax?.key ?? ""
-            let cfg = SettingsStore.indentByLanguage[key] ?? IndentConfig.fallback
-            insertion += cfg.unitString
+        if opener != nil {
+            insertion += indentUnit
         }
         textView.insertText(insertion, replacementRange: selRange)
     }

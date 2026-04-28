@@ -28,6 +28,7 @@ enum Syntax: Int, CaseIterable {
     case markdown   = 22
     case css        = 23
     case makefile   = 24
+    case xml        = 25
 
     var displayName: String {
         switch self {
@@ -56,6 +57,7 @@ enum Syntax: Int, CaseIterable {
         case .markdown:   return "Markdown"
         case .css:        return "CSS"
         case .makefile:   return "Makefile"
+        case .xml:        return "XML"
         }
     }
 
@@ -113,6 +115,7 @@ enum Syntax: Int, CaseIterable {
         case .markdown:   return "markdown/markdown-original"
         case .css:        return "css3/css3-plain"
         case .makefile:   return nil
+        case .xml:        return nil
         }
     }
 
@@ -143,6 +146,8 @@ enum Syntax: Int, CaseIterable {
         case "md", "markdown", "mdown", "mkd":                  return .markdown
         case "css":                                             return .css
         case "mk", "make":                                      return .makefile
+        case "xml", "xsd", "xsl", "xslt", "svg",
+             "plist", "rss", "atom":                            return .xml
         default:                                                return nil
         }
     }
@@ -191,6 +196,7 @@ enum Syntax: Int, CaseIterable {
         case .markdown:   MarkdownHighlighter.highlight(storage)
         case .css:        CSSHighlighter.highlight(storage)
         case .makefile:   MakefileHighlighter.highlight(storage)
+        case .xml:        XMLHighlighter.highlight(storage)
         }
     }
 }

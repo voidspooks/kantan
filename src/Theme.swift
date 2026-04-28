@@ -12,6 +12,10 @@ enum Theme {
     static let cursor     = NSColor.white
     static let selection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
     static let selectionText = NSColor.white
+    /// Subtle background drawn behind every visible occurrence of the word
+    /// the caret is touching. Slightly lighter than `selection` so the two
+    /// don't blur together when the user makes a real selection.
+    static let wordHighlight = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
 
     static let gutterBackground = NSColor(red: 0.165, green: 0.165, blue: 0.180, alpha: 1.0)
     static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
@@ -69,6 +73,13 @@ enum Theme {
             "constant": dConstant,
         ],
         "html": [
+            "tag":       dKeyword,
+            "attribute": dVariable,
+            "string":    dString,
+            "comment":   dComment,
+            "constant":  dConstant,
+        ],
+        "xml": [
             "tag":       dKeyword,
             "attribute": dVariable,
             "string":    dString,
