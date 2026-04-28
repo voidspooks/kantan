@@ -4,6 +4,7 @@ import AppKit
 
 let defaultSettingsYAML = """
 line_numbers: true
+split_orientation: vertical
 
 theme:
   editor_background:  "#000000"
@@ -318,6 +319,14 @@ enum SettingsStore {
 
     static var showLineNumbers: Bool = true
 
+    /// Default orientation used when Cmd+T creates a new split. The user-
+    /// facing names match the divider direction: a "vertical" split has a
+    /// vertical divider with panes side-by-side, which in
+    /// `NSUserInterfaceLayoutOrientation` terms is a `.horizontal` layout
+    /// axis. A "horizontal" split has a horizontal divider with panes
+    /// stacked top/bottom — `.vertical` axis.
+    static var splitOrientation: NSUserInterfaceLayoutOrientation = .horizontal
+
     static let defaultIndents: [String: IndentConfig] = [
         "ruby":       IndentConfig(style: .space, width: 2),
         "yaml":       IndentConfig(style: .space, width: 2),
@@ -370,6 +379,7 @@ enum SettingsStore {
             Theme.apply(language, colors)
         }
         showLineNumbers = parseTopLevelBool("line_numbers", in: text) ?? true
+        splitOrientation = parseSplitOrientation(in: text) ?? .horizontal
 
         var merged = defaultIndents
         for (lang, cfg) in parseIndent(text) {
@@ -522,6 +532,31 @@ enum SettingsStore {
             prefixLines.append("")
         }
         return (prefixLines + lines).joined(separator: "\n")
+    }
+
+    /// Parse `split_orientation: vertical|horizontal`. Defaults to vertical.
+    static func parseSplitOrientation(in text: String) -> NSUserInterfaceLayoutOrientation? {
+        let prefix = "split_orientation:"
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#") { line = String(line[..<hash]) }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+            guard indent == 0, trimmed.hasPrefix(prefix) else { continue }
+            let value = trimmed
+                .dropFirst(prefix.count)
+                .trimmingCharacters(in: .whitespaces)
+                .lowercased()
+            // Map user-facing names to layout axis: "vertical" = vertical
+            // divider = panes side-by-side = .horizontal axis.
+            switch value {
+            case "vertical":   return .horizontal
+            case "horizontal": return .vertical
+            default:           return nil
+            }
+        }
+        return nil
     }
 
     /// Read a top-level `key: <bool>` line. Accepts true/false/yes/no (case-insensitive).

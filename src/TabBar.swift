@@ -17,6 +17,20 @@ final class TabBarView: NSView {
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
     var onReorder: ((_ from: Int, _ to: Int) -> Void)?
+    /// Fires when the user right-clicks a tab. The Pane uses this to show its
+    /// "Split Vertically / Horizontally" menu.
+    var onContextMenu: ((_ index: Int, _ event: NSEvent) -> Void)?
+    /// Fires on mouseUp when the cursor sits outside this bar's bounds. Return
+    /// true if the coordinator consumed the drop (e.g. transferred the tab to
+    /// another pane); otherwise the bar treats it as a no-op.
+    var onTabDropOutsideBar: ((_ sourceIndex: Int, _ windowPoint: NSPoint) -> Bool)?
+
+    /// Live array of tab item views in their current visual order — used by
+    /// the editor coordinator when computing the insertion index for a tab
+    /// dropped from another pane.
+    var arrangedTabViews: [TabItemView] {
+        return stack.arrangedSubviews.compactMap { $0 as? TabItemView }
+    }
 
     private let stack = NSStackView()
     private let scroll = NSScrollView()
@@ -100,6 +114,11 @@ final class TabBarView: NSView {
                       let idx = self.stack.arrangedSubviews.firstIndex(of: view) else { return }
                 self.onClose?(idx)
             }
+            view.onRightMouseDown = { [weak self] tab, event in
+                guard let self = self,
+                      let idx = self.stack.arrangedSubviews.firstIndex(of: tab) else { return }
+                self.onContextMenu?(idx, event)
+            }
             stack.addArrangedSubview(view)
         }
         needsDisplay = true
@@ -154,11 +173,20 @@ final class TabBarView: NSView {
                 tab.layer?.zPosition = 0
                 tab.layer?.setAffineTransform(.identity)
                 if didDrag {
-                    let finalIndex = stack.arrangedSubviews.firstIndex(of: tab) ?? originalIndex
-                    if finalIndex != originalIndex {
-                        onReorder?(originalIndex, finalIndex)
+                    let pointInBar = convert(next.locationInWindow, from: nil)
+                    let droppedOutside = !bounds.contains(pointInBar)
+                    if droppedOutside,
+                       let handler = onTabDropOutsideBar,
+                       handler(originalIndex, next.locationInWindow) {
+                        // Coordinator transferred the tab to another pane. The
+                        // source pane will rebuild its tab bar shortly.
                     } else {
-                        onSelect?(originalIndex)
+                        let finalIndex = stack.arrangedSubviews.firstIndex(of: tab) ?? originalIndex
+                        if finalIndex != originalIndex {
+                            onReorder?(originalIndex, finalIndex)
+                        } else {
+                            onSelect?(originalIndex)
+                        }
                     }
                 } else {
                     onSelect?(originalIndex)
@@ -222,6 +250,7 @@ final class TabBarView: NSView {
 
 final class TabItemView: NSView {
     var onMouseDown: ((TabItemView, NSEvent) -> Void)?
+    var onRightMouseDown: ((TabItemView, NSEvent) -> Void)?
     var onClose: (() -> Void)?
 
     private let item: TabBarItem
@@ -317,6 +346,10 @@ final class TabItemView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onMouseDown?(self, event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightMouseDown?(self, event)
     }
 
     @objc private func handleClose() {

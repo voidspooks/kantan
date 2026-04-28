@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kantan 簡単 — Docs</title>
+<meta name="description" content="Documentation for Kantan, a minimalist native macOS text editor.">
+<style>
+  :root {
+    --bg: #000000;
+    --fg: #d4d4d4;
+    --dim: #888;
+    --accent: #e0a060;
+    --rule: #2a2a2a;
+    --sidebar-width: 17rem;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  html { scroll-behavior: smooth; }
+
+  /* Layout: fixed sidebar on the left, scrolling content on the right. */
+  .layout {
+    display: flex;
+    align-items: flex-start;
+    max-width: 1640px;
+    margin: 0 auto;
+  }
+
+  nav.sidebar {
+    position: sticky;
+    top: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2.5rem 1.25rem 2rem 1.5rem;
+    border-right: 1px solid var(--rule);
+    flex-shrink: 0;
+    scrollbar-color: #444 var(--bg);
+    scrollbar-width: thin;
+  }
+  nav.sidebar::-webkit-scrollbar { width: 10px; }
+  nav.sidebar::-webkit-scrollbar-track { background: var(--bg); }
+  nav.sidebar::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 5px;
+    border: 2px solid var(--bg);
+  }
+  nav.sidebar::-webkit-scrollbar-thumb:hover { background: #555; }
+  nav.sidebar::-webkit-scrollbar-corner { background: var(--bg); }
+  nav.sidebar .brand {
+    display: block;
+    color: var(--fg);
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.25rem;
+  }
+  nav.sidebar .brand:hover { border-bottom-color: transparent; }
+  nav.sidebar .brand .jp {
+    color: var(--accent);
+    margin-left: 0.35rem;
+  }
+  nav.sidebar .kicker {
+    color: var(--dim);
+    font-size: 0.8rem;
+    margin: 0 0 1.5rem;
+  }
+  nav.sidebar h3 {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 1.5rem 0 0.5rem;
+  }
+  nav.sidebar ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  nav.sidebar li { margin: 0; }
+  nav.sidebar a {
+    display: block;
+    color: var(--fg);
+    padding: 0.2rem 0;
+    border-bottom: none;
+    font-size: 0.9rem;
+  }
+  nav.sidebar a:hover { color: var(--accent); }
+  nav.sidebar .home {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--rule);
+    color: var(--dim);
+    font-size: 0.8rem;
+  }
+  nav.sidebar .home a { color: var(--dim); font-size: 0.8rem; }
+  nav.sidebar .home a:hover { color: var(--accent); }
+
+  main {
+    flex: 1;
+    min-width: 0;
+    padding: 4rem 2.5rem 6rem;
+    max-width: 60rem;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 500;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--accent);
+    margin: 3rem 0 0.75rem;
+    scroll-margin-top: 1.5rem;
+  }
+  h3 {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--fg);
+    margin: 1.75rem 0 0.5rem;
+    scroll-margin-top: 1.5rem;
+  }
+  p { margin: 0.75rem 0; }
+  .tagline {
+    color: var(--dim);
+    margin-bottom: 0;
+  }
+  ul {
+    padding-left: 1.25rem;
+    margin: 0.5rem 0;
+  }
+  li { margin: 0.25rem 0; }
+  pre {
+    background: #111;
+    border: 1px solid var(--rule);
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.9rem;
+  }
+  code { color: var(--accent); }
+  pre code { color: var(--fg); }
+  a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+  main a:hover { border-bottom-color: var(--accent); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0 1rem;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.4rem 0.75rem 0.4rem 0;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th {
+    color: var(--dim);
+    font-weight: 500;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  td.shortcut { color: var(--accent); white-space: nowrap; }
+
+  kbd {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    font-size: 0.85em;
+    color: var(--accent);
+    background: #111;
+  }
+
+  footer {
+    color: var(--dim);
+    font-size: 0.85rem;
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* Mobile: sidebar collapses above the content. */
+  @media (max-width: 800px) {
+    .layout { flex-direction: column; }
+    nav.sidebar {
+      position: static;
+      width: 100%;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--rule);
+      padding: 2rem 1.5rem 1.5rem;
+    }
+    main { padding: 2rem 1.5rem 4rem; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav class="sidebar" aria-label="Docs navigation">
+    <a href="index.html" class="brand">Kantan<span class="jp">簡単</span></a>
+    <p class="kicker">Documentation</p>
+
+    <h3>Getting started</h3>
+    <ul>
+      <li><a href="#introduction">Introduction</a></li>
+      <li><a href="#install">Install &amp; build</a></li>
+      <li><a href="#first-run">First run</a></li>
+    </ul>
+
+    <h3>Using the editor</h3>
+    <ul>
+      <li><a href="#files">Opening files &amp; folders</a></li>
+      <li><a href="#tabs">Tabs</a></li>
+      <li><a href="#splits">Split panes</a></li>
+      <li><a href="#editing">Editing</a></li>
+      <li><a href="#find">Find &amp; replace</a></li>
+      <li><a href="#sidebar">Sidebar &amp; file tree</a></li>
+      <li><a href="#git">Git integration</a></li>
+      <li><a href="#syntax">Syntax highlighting</a></li>
+      <li><a href="#font">Font size</a></li>
+      <li><a href="#session">Session restore</a></li>
+    </ul>
+
+    <h3>Configuration</h3>
+    <ul>
+      <li><a href="#settings">settings.yaml</a></li>
+      <li><a href="#theme">Theme colors</a></li>
+      <li><a href="#indent">Indent style</a></li>
+      <li><a href="#syntax-colors">Syntax colors</a></li>
+      <li><a href="#line-numbers">Line numbers</a></li>
+    </ul>
+
+    <h3>Reference</h3>
+    <ul>
+      <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+      <li><a href="#languages">Supported languages</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+
+    <p class="home"><a href="index.html">← Back to home</a></p>
+  </nav>
+
+  <main>
+    <h1>Kantan Docs</h1>
+    <p class="tagline">How to use Kantan, a small text editor for macOS.</p>
+
+    <h2 id="introduction">Introduction</h2>
+    <p>Kantan is a native macOS text editor written in Swift. It opens files, edits them, saves them. It highlights syntax, shows line numbers, marks git changes in the gutter, and lets you split the window in two. That's roughly the whole feature set, and it's intentional.</p>
+    <p>The philosophy: editors grow heavy as features pile up. Kantan resists this. If a feature does not earn its place, it does not belong.</p>
+    <p>If you're looking for plugins, AI integration, language servers, or a settings UI with hundreds of toggles, Kantan is not for you. If you want a fast, dark, keyboard-driven editor that opens instantly and stays out of your way, read on.</p>
+
+    <h2 id="install">Install &amp; build</h2>
+    <p>Kantan ships as source. You build it locally with the system Swift toolchain — no package manager, no Xcode project, just <code>swiftc</code> and a <code>Makefile</code>.</p>
+    <h3>Requirements</h3>
+    <ul>
+      <li>macOS with the Xcode Command Line Tools installed (<code>xcode-select --install</code>).</li>
+      <li>The <code>swiftc</code> compiler on your <code>PATH</code>.</li>
+    </ul>
+    <h3>Build</h3>
+    <p>From the project root:</p>
+    <pre><code>make</code></pre>
+    <p>This compiles every <code>.swift</code> file under <code>src/</code> into <code>Kantan.app/Contents/MacOS/Kantan</code>, copies <code>Info.plist</code> into the bundle, and generates <code>AppIcon.icns</code> from <code>icon.png</code>.</p>
+    <h3>Run</h3>
+    <pre><code>make run</code></pre>
+    <p>This builds (if needed) and opens <code>Kantan.app</code>. You can also drag the <code>.app</code> bundle into <code>/Applications</code> and launch it from there.</p>
+    <h3>Clean</h3>
+    <pre><code>make clean</code></pre>
+    <p>Removes the built app, the <code>build/</code> directory, and the generated icon files.</p>
+
+    <h2 id="first-run">First run</h2>
+    <p>The first time Kantan launches, it creates a config file at:</p>
+    <pre><code>~/Library/Application Support/Kantan/settings.yaml</code></pre>
+    <p>The file is seeded with sensible defaults — line numbers on, dark background, per-language indent rules, and a syntax highlighting palette for every supported language. You don't need to touch it to get started; it's there if you want to customize anything later. See <a href="#settings">settings.yaml</a> for details.</p>
+    <p>An empty <em>Untitled</em> tab opens automatically. Start typing, or press <kbd>⌘O</kbd> to open a file.</p>
+
+    <h2 id="files">Opening files &amp; folders</h2>
+    <p>Kantan opens individual files and entire folders. A folder open populates the left sidebar with a file tree; an individual file open just adds a tab.</p>
+    <h3>Open a file</h3>
+    <p><kbd>⌘O</kbd>, or <strong>File → Open…</strong>. Pick a file in the panel.</p>
+    <p>If the file is already open in any pane, Kantan focuses its existing tab instead of opening a duplicate.</p>
+    <h3>Open a folder</h3>
+    <p><kbd>⌘⇧O</kbd>, or <strong>File → Open Folder…</strong>. Pick a directory.</p>
+    <p>The folder appears in the sidebar. Click any file to open it as a tab. The sidebar persists across launches — see <a href="#session">session restore</a>.</p>
+    <h3>Save</h3>
+    <ul>
+      <li><kbd>⌘S</kbd> — save the current tab. If the tab is <em>Untitled</em>, this opens a Save As panel.</li>
+      <li><kbd>⌘⇧S</kbd> — save the current tab to a new path.</li>
+    </ul>
+    <p>Saving an <em>Untitled</em> tab to a known extension automatically enables syntax highlighting for that language.</p>
+    <h3>New &amp; close</h3>
+    <ul>
+      <li><kbd>⌘N</kbd> — new <em>Untitled</em> tab.</li>
+      <li><kbd>⌘W</kbd> — close the active tab. If the tab has unsaved changes, you'll be prompted to save, discard, or cancel.</li>
+      <li><kbd>⌘⇧W</kbd> — close the entire window. Same prompt for any dirty tab.</li>
+    </ul>
+
+    <h2 id="tabs">Tabs</h2>
+    <p>Each pane has its own tab bar across the top. A dot to the left of a tab title means the tab has unsaved changes.</p>
+    <h3>Switch tabs</h3>
+    <ul>
+      <li>Click a tab to focus it.</li>
+      <li><kbd>⌘⇧]</kbd> — next tab.</li>
+      <li><kbd>⌘⇧[</kbd> — previous tab.</li>
+    </ul>
+    <h3>Reorder tabs</h3>
+    <p>Drag a tab left or right within the tab bar to reorder it.</p>
+    <h3>Tab context menu</h3>
+    <p>Right-click any tab to split the window with that tab — see <a href="#splits">split panes</a>.</p>
+
+    <h2 id="splits">Split panes</h2>
+    <p>Kantan supports a single split — two panes side-by-side or stacked. Each pane has its own tab list, scroll position, and active tab.</p>
+    <h3>Create a split</h3>
+    <ul>
+      <li>Right-click a tab and choose <strong>Split Vertically</strong> or <strong>Split Horizontally</strong>. The chosen tab moves into the new pane.</li>
+    </ul>
+    <h3>Move tabs between panes</h3>
+    <p>Drag a tab off its tab bar and drop it onto the other pane's tab bar. The tab is transferred (with its undo history, scroll position, and dirty state) to the destination pane at the drop position.</p>
+    <h3>Collapse the split</h3>
+    <p>Close every tab in one pane. When a pane empties, it disappears and the remaining pane fills the window.</p>
+
+    <h2 id="editing">Editing</h2>
+    <p>Editing is plain <code>NSTextView</code> behavior with a few additions.</p>
+    <h3>Auto-pair</h3>
+    <p>Typing <code>{</code>, <code>[</code>, <code>(</code>, <code>`</code>, <code>"</code>, or <code>'</code> auto-inserts the closing character and places the cursor between them. Quotes are <em>not</em> auto-paired when the previous character is a letter, digit, or underscore — so you can type <code>don't</code> without fighting the editor.</p>
+    <p>If you have a selection when you press an opener, the selection is wrapped in the pair instead.</p>
+    <h3>Auto-indent</h3>
+    <p>Pressing <kbd>Return</kbd> carries the leading whitespace of the current line onto the new line. If the line ends in <code>{</code>, <code>[</code>, or <code>(</code>, an extra indent is added — using the per-language indent style and width from <code>settings.yaml</code>. See <a href="#indent">indent style</a>.</p>
+    <h3>Undo &amp; redo</h3>
+    <p>Each tab has its own undo manager, so undo on one tab never replays edits from another.</p>
+    <ul>
+      <li><kbd>⌘Z</kbd> — undo.</li>
+      <li><kbd>⌘⇧Z</kbd> — redo.</li>
+    </ul>
+    <h3>Cut, copy, paste, select all</h3>
+    <p>Standard system shortcuts: <kbd>⌘X</kbd>, <kbd>⌘C</kbd>, <kbd>⌘V</kbd>, <kbd>⌘A</kbd>.</p>
+
+    <h2 id="find">Find &amp; replace</h2>
+    <p><kbd>⌘F</kbd> opens the find bar at the top of the current pane. The bar uses the system's incremental find — matches are highlighted as you type.</p>
+    <p>The bar's mode toggle switches between Find and Find &amp; Replace. The standard system controls (next, previous, replace, replace all, regex, case-sensitive, wrap) are all available.</p>
+
+    <h2 id="sidebar">Sidebar &amp; file tree</h2>
+    <p>When you open a folder, its contents appear in the sidebar on the left. Hidden files (dotfiles) are not shown.</p>
+    <h3>Toggle the sidebar</h3>
+    <p><kbd>⌘B</kbd>, or <strong>Configuration → Toggle Sidebar</strong>.</p>
+    <h3>Open files</h3>
+    <p>Click any file row to open it in the focused pane.</p>
+    <h3>Expand &amp; collapse folders</h3>
+    <p>Click a folder row to toggle expansion. Sub-trees stay loaded across refreshes.</p>
+    <h3>Right-click menu</h3>
+    <p>Right-click a row (or empty sidebar space) for these actions:</p>
+    <ul>
+      <li><strong>Copy</strong> — copy the file/folder URL to the system pasteboard.</li>
+      <li><strong>Paste</strong> — paste files from the pasteboard into the clicked directory. Name collisions get a <code>file 2.txt</code>-style suffix.</li>
+      <li><strong>Rename</strong> — inline-edit the name. Press <kbd>Return</kbd> to commit, <kbd>Esc</kbd> to cancel.</li>
+      <li><strong>New File</strong> / <strong>New Folder</strong> — only on directories (and empty space). Creates a placeholder and drops you into rename mode.</li>
+      <li><strong>Delete</strong> — confirms, then moves to Trash.</li>
+    </ul>
+    <h3>External changes</h3>
+    <p>The sidebar watches the project directory with FSEvents. When files change on disk (other editors, <code>git checkout</code>, build tools), the tree and git status refresh automatically after a brief debounce. Press <strong>Configuration → Refresh Sidebar</strong> to force an immediate refresh.</p>
+    <h3>Footer</h3>
+    <p>The bottom of the sidebar shows the current cursor position (<code>Ln 12, Col 4</code>) and, if the project root is a git repo, the current branch.</p>
+
+    <h2 id="git">Git integration</h2>
+    <p>Kantan is git-aware in two small ways. There are no commands to run, no buttons to push — git state is just visible at a glance.</p>
+    <h3>Sidebar status colors</h3>
+    <p>When the project root is a git repository, file rows are colored according to <code>git status --porcelain</code>:</p>
+    <ul>
+      <li>Untracked files are tinted (and untracked directories cascade their state to every file inside).</li>
+      <li>Modified files are tinted differently.</li>
+    </ul>
+    <p>The status snapshot refreshes when the file tree changes, when you save a file, or when FSEvents reports a directory change.</p>
+    <h3>Branch indicator</h3>
+    <p>The sidebar footer shows the current branch name, refreshed alongside the status snapshot. The footer hides itself when the project root isn't a git repo.</p>
+    <h3>Gutter diff strips</h3>
+    <p>To the left of the line numbers, Kantan draws colored strips for lines that differ from <code>HEAD</code>. The strips recompute on file open and on save, so they stay accurate as you edit.</p>
+
+    <h2 id="syntax">Syntax highlighting</h2>
+    <p>Highlighting is built in for 25 languages — see <a href="#languages">supported languages</a>. The highlighters are simple regex-driven passes; they're fast and unobtrusive, not semantically perfect.</p>
+    <h3>Auto-detection</h3>
+    <p>When you open a file, Kantan picks a language from the file extension (or, for <code>Makefile</code>, the filename). If a language is detected and highlighting is currently off, it's switched on automatically.</p>
+    <h3>Toggle highlighting</h3>
+    <p><strong>Configuration → Syntax Highlighting</strong>.</p>
+    <h3>Override the language</h3>
+    <p><strong>Configuration → Language</strong> shows every supported language with a checkmark next to the active one. Pick another to re-highlight the active tab against that grammar — useful for files with non-standard extensions.</p>
+    <h3>Recolor on settings change</h3>
+    <p>If you save changes to <code>settings.yaml</code> from inside Kantan, the syntax palette reloads and every open tab is re-highlighted in place. No restart.</p>
+
+    <h2 id="font">Font size</h2>
+    <p>Kantan uses Menlo by default (falling back to the system monospace font). The size lives between 8pt and 32pt.</p>
+    <ul>
+      <li><kbd>⌘+</kbd> — increase text size.</li>
+      <li><kbd>⌘-</kbd> — decrease text size.</li>
+    </ul>
+    <p>The size applies to every pane, the line-number gutter, the tab bar, and the sidebar at once.</p>
+
+    <h2 id="session">Session restore</h2>
+    <p>Kantan remembers the last folder and last file you had open, in <code>UserDefaults</code>. On launch, it restores both — the folder repopulates the sidebar, and the file opens into the first tab. If neither is set (or either has been deleted), it opens a fresh <em>Untitled</em> tab.</p>
+
+    <h2 id="settings">settings.yaml</h2>
+    <p>Configuration lives in a single YAML file:</p>
+    <pre><code>~/Library/Application Support/Kantan/settings.yaml</code></pre>
+    <p>Open it from Kantan with <strong>Configuration → Settings</strong>. Saving the file from inside Kantan reloads the configuration and applies it to every open tab without a restart.</p>
+    <p>The file has four top-level sections: <code>line_numbers</code>, <code>theme</code>, <code>indent</code>, and <code>syntax_highlighting</code>. The parser is forgiving — anything outside these shapes is silently ignored, and missing keys fall back to defaults.</p>
+
+    <h2 id="theme">Theme colors</h2>
+    <p>The <code>theme</code> block currently controls two backgrounds:</p>
+    <pre><code>theme:
+  editor_background:  "#000000"
+  sidebar_background: "#000000"</code></pre>
+    <p>Values are <code>"#RRGGBB"</code> hex strings. Anything else is ignored. Foreground text colors live in the <code>syntax_highlighting</code> block.</p>
+
+    <h2 id="indent">Indent style</h2>
+    <p>The <code>indent</code> block sets per-language indent character (<code>tab</code> or <code>space</code>) and width:</p>
+    <pre><code>indent:
+  swift:
+    style: space
+    width: 4
+  go:
+    style: tab
+    width: 1
+  yaml:
+    style: space
+    width: 2</code></pre>
+    <p>The values are used by the auto-indent rule that triggers after a line ending in <code>{</code>, <code>[</code>, or <code>(</code>. If a language is missing or malformed, Kantan falls back to four spaces.</p>
+
+    <h2 id="syntax-colors">Syntax colors</h2>
+    <p>Each supported language has its own block under <code>syntax_highlighting</code>, mapping token kinds to hex colors:</p>
+    <pre><code>syntax_highlighting:
+  ruby:
+    keyword:  "#c685c0"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+    symbol:   "#569cd6"
+    variable: "#9cdcfe"</code></pre>
+    <p>Token names vary slightly by language — Markdown has <code>heading</code>, <code>strong</code>, <code>blockquote</code>; HTML has <code>tag</code>, <code>attribute</code>; CSS has <code>selector</code>, <code>property</code>; and so on. The defaults seeded into <code>settings.yaml</code> on first launch are the canonical reference for what's available.</p>
+    <p>Unknown token names and malformed colors are ignored, so you can edit one value at a time without breaking the rest.</p>
+
+    <h2 id="line-numbers">Line numbers</h2>
+    <p>The top-level <code>line_numbers</code> key toggles the gutter:</p>
+    <pre><code>line_numbers: true</code></pre>
+    <p>You can also flip it from the menu: <strong>Configuration → Show Line Numbers</strong> (<kbd>⌘⇧L</kbd>). Toggling from the menu rewrites <code>settings.yaml</code> in place — preserving any trailing comment on that line — so the change persists across launches.</p>
+
+    <h2 id="shortcuts">Keyboard shortcuts</h2>
+    <h3>File</h3>
+    <table>
+      <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+      <tbody>
+        <tr><td>New</td><td class="shortcut"><kbd>⌘N</kbd></td></tr>
+        <tr><td>Open…</td><td class="shortcut"><kbd>⌘O</kbd></td></tr>
+        <tr><td>Open Folder…</td><td class="shortcut"><kbd>⌘⇧O</kbd></td></tr>
+        <tr><td>Save</td><td class="shortcut"><kbd>⌘S</kbd></td></tr>
+        <tr><td>Save As…</td><td class="shortcut"><kbd>⌘⇧S</kbd></td></tr>
+        <tr><td>Close Tab</td><td class="shortcut"><kbd>⌘W</kbd></td></tr>
+        <tr><td>Close Window</td><td class="shortcut"><kbd>⌘⇧W</kbd></td></tr>
+      </tbody>
+    </table>
+    <h3>Edit</h3>
+    <table>
+      <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+      <tbody>
+        <tr><td>Undo</td><td class="shortcut"><kbd>⌘Z</kbd></td></tr>
+        <tr><td>Redo</td><td class="shortcut"><kbd>⌘⇧Z</kbd></td></tr>
+        <tr><td>Cut</td><td class="shortcut"><kbd>⌘X</kbd></td></tr>
+        <tr><td>Copy</td><td class="shortcut"><kbd>⌘C</kbd></td></tr>
+        <tr><td>Paste</td><td class="shortcut"><kbd>⌘V</kbd></td></tr>
+        <tr><td>Select All</td><td class="shortcut"><kbd>⌘A</kbd></td></tr>
+        <tr><td>Find &amp; Replace…</td><td class="shortcut"><kbd>⌘F</kbd></td></tr>
+        <tr><td>Increase Text Size</td><td class="shortcut"><kbd>⌘+</kbd></td></tr>
+        <tr><td>Decrease Text Size</td><td class="shortcut"><kbd>⌘-</kbd></td></tr>
+      </tbody>
+    </table>
+    <h3>View &amp; navigation</h3>
+    <table>
+      <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+      <tbody>
+        <tr><td>Toggle Sidebar</td><td class="shortcut"><kbd>⌘B</kbd></td></tr>
+        <tr><td>Show / Hide Line Numbers</td><td class="shortcut"><kbd>⌘⇧L</kbd></td></tr>
+        <tr><td>Next Tab</td><td class="shortcut"><kbd>⌘⇧]</kbd></td></tr>
+        <tr><td>Previous Tab</td><td class="shortcut"><kbd>⌘⇧[</kbd></td></tr>
+      </tbody>
+    </table>
+    <h3>App</h3>
+    <table>
+      <thead><tr><th>Action</th><th>Shortcut</th></tr></thead>
+      <tbody>
+        <tr><td>Hide Kantan</td><td class="shortcut"><kbd>⌘H</kbd></td></tr>
+        <tr><td>Quit</td><td class="shortcut"><kbd>⌘Q</kbd></td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="languages">Supported languages</h2>
+    <p>Twenty-five built-in highlighters, matched by file extension (or filename, for <code>Makefile</code>):</p>
+    <table>
+      <thead><tr><th>Language</th><th>Extensions</th></tr></thead>
+      <tbody>
+        <tr><td>Ruby</td><td><code>.rb</code></td></tr>
+        <tr><td>YAML</td><td><code>.yaml</code>, <code>.yml</code></td></tr>
+        <tr><td>Swift</td><td><code>.swift</code></td></tr>
+        <tr><td>JavaScript</td><td><code>.js</code>, <code>.mjs</code>, <code>.cjs</code>, <code>.jsx</code></td></tr>
+        <tr><td>HTML</td><td><code>.html</code>, <code>.htm</code></td></tr>
+        <tr><td>Python</td><td><code>.py</code>, <code>.pyw</code>, <code>.pyi</code></td></tr>
+        <tr><td>TypeScript</td><td><code>.ts</code>, <code>.tsx</code>, <code>.mts</code>, <code>.cts</code></td></tr>
+        <tr><td>Java</td><td><code>.java</code></td></tr>
+        <tr><td>C</td><td><code>.c</code>, <code>.h</code></td></tr>
+        <tr><td>C++</td><td><code>.cpp</code>, <code>.cc</code>, <code>.cxx</code>, <code>.c++</code>, <code>.hpp</code>, <code>.hh</code>, <code>.hxx</code></td></tr>
+        <tr><td>C#</td><td><code>.cs</code></td></tr>
+        <tr><td>PHP</td><td><code>.php</code>, <code>.phtml</code></td></tr>
+        <tr><td>Go</td><td><code>.go</code></td></tr>
+        <tr><td>Rust</td><td><code>.rs</code></td></tr>
+        <tr><td>Kotlin</td><td><code>.kt</code>, <code>.kts</code></td></tr>
+        <tr><td>SQL</td><td><code>.sql</code></td></tr>
+        <tr><td>R</td><td><code>.r</code></td></tr>
+        <tr><td>Dart</td><td><code>.dart</code></td></tr>
+        <tr><td>Scala</td><td><code>.scala</code>, <code>.sc</code></td></tr>
+        <tr><td>Perl</td><td><code>.pl</code>, <code>.pm</code></td></tr>
+        <tr><td>Lua</td><td><code>.lua</code></td></tr>
+        <tr><td>Bash</td><td><code>.sh</code>, <code>.bash</code>, <code>.zsh</code></td></tr>
+        <tr><td>Markdown</td><td><code>.md</code>, <code>.markdown</code>, <code>.mdown</code>, <code>.mkd</code></td></tr>
+        <tr><td>CSS</td><td><code>.css</code></td></tr>
+        <tr><td>Makefile</td><td><code>.mk</code>, <code>.make</code>, or named <code>Makefile</code> / <code>GNUmakefile</code> / <code>BSDmakefile</code></td></tr>
+      </tbody>
+    </table>
+    <p>If a file's extension isn't on this list, it opens as a plain unhighlighted buffer. You can force a language from <strong>Configuration → Language</strong>.</p>
+
+    <h2 id="troubleshooting">Troubleshooting</h2>
+    <h3>I edited <code>settings.yaml</code> but nothing changed</h3>
+    <p>Settings reload when the file is saved <em>from inside Kantan</em>. If you edited it with another tool, open <strong>Configuration → Settings</strong> and save it (<kbd>⌘S</kbd>) once — Kantan will pick up the new values. Or quit and relaunch.</p>
+    <h3>Syntax highlighting looks wrong for a file</h3>
+    <p>Force the language with <strong>Configuration → Language</strong>. Kantan picks a language from the extension; if your file has a non-standard extension, the auto-detect won't fire.</p>
+    <h3>The git footer is missing</h3>
+    <p>The branch indicator only shows when the project root is a git repository. If you opened a sub-directory of a repo as the root, Kantan won't recognize it as a repo — open the repo root instead.</p>
+    <h3>The sidebar didn't update after I created a file outside Kantan</h3>
+    <p>Kantan watches with FSEvents and refreshes after a one-second debounce. If it still hasn't picked up a change, run <strong>Configuration → Refresh Sidebar</strong>.</p>
+    <h3>Build fails with "no such file or directory: swiftc"</h3>
+    <p>Install the Xcode Command Line Tools: <code>xcode-select --install</code>.</p>
+
+    <footer>
+      MIT licensed. <a href="index.html">Back to home</a> · <a href="https://github.com/voidspooks/kantan">GitHub</a>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

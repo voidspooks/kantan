@@ -3,8 +3,8 @@ import AppKit
 // MARK: - Document tab
 //
 // One open document. Holds its own NSTextStorage, syntax, dirty flag, undo
-// manager, and per-view state (selection, scroll). The Editor owns a list of
-// these and swaps the active one in/out of the single shared NSTextView.
+// manager, and per-view state (selection, scroll). A Pane owns a list of these
+// and swaps the active one in/out of its NSTextView.
 
 final class DocumentTab {
     let id = UUID()
@@ -32,13 +32,34 @@ final class DocumentTab {
     var displayName: String { url?.lastPathComponent ?? "Untitled" }
 }
 
-// MARK: - Editor
+// MARK: - EditorTextView
+//
+// NSTextView subclass that lets the owning Pane know when it gains focus, so
+// the Editor coordinator can mark this pane as the active one.
 
-final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindowDelegate {
-    var window: NSWindow!
-    var textView: NSTextView!
-    var gutterView: GutterView!
-    var workspaceView: WorkspaceView!
+final class EditorTextView: NSTextView {
+    var onBecomeFirstResponder: (() -> Void)?
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result { onBecomeFirstResponder?() }
+        return result
+    }
+}
+
+// MARK: - Pane
+//
+// One editor pane. Owns its own tab list, text view, scroll view, gutter, and
+// tab bar. Acts as its own delegate for text view + text storage events.
+// Coordinator-level events (focus changes, active-tab changes, split requests,
+// cross-pane drags) are surfaced via callbacks to the Editor.
+
+final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
+    let textView: EditorTextView
+    let scrollView: NSScrollView
+    let gutterView: GutterView
+    let gutterContainer: GutterContainerView
+    let tabBar: TabBarView
+    let paneView: EditorPaneView
 
     private(set) var tabs: [DocumentTab] = []
     private(set) var activeTabIndex: Int? = nil
@@ -47,67 +68,51 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         return tabs[i]
     }
 
-    /// Current URL — backed by the active tab.
-    var currentURL: URL? { activeTab?.url }
-    var dirty: Bool { activeTab?.dirty ?? false }
-    var activeSyntax: Syntax? { activeTab?.activeSyntax }
-
-    static let minFontSize: CGFloat = 8
-    static let maxFontSize: CGFloat = 32
-
-    private var currentFontSize: CGFloat = 13
     private var editorFont: NSFont
     var syntaxHighlightingEnabled = false
-    weak var syntaxHighlightingMenuItem: NSMenuItem?
-    weak var lineNumbersMenuItem: NSMenuItem?
-    weak var languageMenu: NSMenu?
 
-    override init() {
-        self.editorFont = Editor.makeFont(size: 13)
-        super.init()
-    }
+    // Coordinator callbacks. Set by Editor after construction.
+    var onActivated: (() -> Void)?
+    var onCursorPositionChanged: ((String) -> Void)?
+    var onActiveTabChanged: (() -> Void)?
+    var onLastTabClosed: (() -> Void)?
+    var onSplitRequested: ((NSUserInterfaceLayoutOrientation, Int) -> Void)?
+    /// User clicked the X on a tab. The editor handles the dirty-confirm
+    /// prompt and then calls back into `closeTab(at:)`.
+    var onTabCloseRequested: ((Int) -> Void)?
+    /// On mouseUp at the end of a tab drag, called with (sourceTabIndex,
+    /// windowPoint). The coordinator returns true if it consumed the drop
+    /// (transferred the tab to another pane); otherwise the pane handles it
+    /// as a normal in-pane reorder.
+    var onTabDropOutsideBar: ((Int, NSPoint) -> Bool)?
+    /// Called when the active tab's URL or dirty state changes — Editor uses
+    /// it to keep the window title in sync.
+    var onTitleStateChanged: (() -> Void)?
 
-    private static func makeFont(size: CGFloat) -> NSFont {
-        return NSFont(name: "Menlo", size: size)
-            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-    }
+    init(font: NSFont) {
+        self.editorFont = font
 
-    func setup() {
-        let frame = NSRect(x: 0, y: 0, width: 900, height: 700)
-        window = NSWindow(
-            contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.titlebarAppearsTransparent = true
-        window.backgroundColor = Theme.background
-        window.center()
-        window.delegate = self
-        window.isReleasedWhenClosed = false
-
-        let scrollView = NSScrollView(frame: frame)
+        scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
-        scrollView.autoresizingMask = [.width, .height]
         scrollView.drawsBackground = true
         scrollView.backgroundColor = Theme.background
         scrollView.scrollerStyle = .overlay
         scrollView.verticalScroller = MinimalScroller()
 
-        let contentSize = scrollView.contentSize
-        textView = NSTextView(frame: NSRect(origin: .zero, size: contentSize))
-        textView.minSize = NSSize(width: 0, height: contentSize.height)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let initialContentSize = NSSize(width: 600, height: 400)
+        textView = EditorTextView(frame: NSRect(origin: .zero, size: initialContentSize))
+        textView.minSize = NSSize(width: 0, height: initialContentSize.height)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainerInset = NSSize(width: 8, height: 8)
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
-
+        textView.textContainer?.containerSize = NSSize(width: initialContentSize.width,
+                                                       height: CGFloat.greatestFiniteMagnitude)
         textView.font = editorFont
         textView.backgroundColor = Theme.background
         textView.textColor = Theme.foreground
@@ -128,92 +133,119 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         textView.allowsUndo = true
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-
         textView.typingAttributes = [
             .font: editorFont,
             .foregroundColor: Theme.foreground
         ]
 
-        textView.delegate = self
-
         scrollView.documentView = textView
 
         gutterView = GutterView(textView: textView, scrollView: scrollView)
         gutterView.gutterFont = editorFont
-        let container = GutterContainerView(gutter: gutterView, scrollView: scrollView)
-        container.translatesAutoresizingMaskIntoConstraints = false
+        gutterContainer = GutterContainerView(gutter: gutterView, scrollView: scrollView)
+        gutterContainer.translatesAutoresizingMaskIntoConstraints = false
 
-        let tabBar = TabBarView()
+        tabBar = TabBarView()
         tabBar.translatesAutoresizingMaskIntoConstraints = false
-        tabBar.onSelect = { [weak self] index in self?.switchToTab(at: index) }
-        tabBar.onClose  = { [weak self] index in self?.closeTab(at: index) }
-        tabBar.onReorder = { [weak self] from, to in self?.reorderTab(from: from, to: to) }
 
-        let editorPane = EditorPaneView(tabBar: tabBar, gutterContainer: container)
-        editorPane.translatesAutoresizingMaskIntoConstraints = false
+        paneView = EditorPaneView(tabBar: tabBar, gutterContainer: gutterContainer)
+        paneView.translatesAutoresizingMaskIntoConstraints = false
 
-        workspaceView = WorkspaceView(editorPane: editorPane)
-        workspaceView.frame = frame
-        workspaceView.autoresizingMask = [.width, .height]
-        workspaceView.sidebar.onSelect = { [weak self] url in
-            self?.openOrFocus(url: url)
+        super.init()
+
+        textView.delegate = self
+        textView.onBecomeFirstResponder = { [weak self] in self?.onActivated?() }
+
+        tabBar.onSelect = { [weak self] index in
+            self?.onActivated?()
+            self?.switchToTab(at: index)
         }
-        workspaceView.sidebar.onRename = { [weak self] oldURL, newURL in
-            self?.handleSidebarRename(from: oldURL, to: newURL)
+        tabBar.onClose = { [weak self] index in
+            self?.onActivated?()
+            self?.onTabCloseRequested?(index)
         }
-        workspaceView.sidebar.onExternalChange = { [weak self] in
-            guard let self = self, let tab = self.activeTab, let url = tab.url else { return }
-            DispatchQueue.global(qos: .utility).async {
-                let changes = GitDiff.changes(for: url)
-                DispatchQueue.main.async { [weak self] in
-                    tab.lineChanges = changes
-                    self?.gutterView?.setLineChanges(changes)
-                }
-            }
+        tabBar.onReorder = { [weak self] from, to in
+            self?.reorderTab(from: from, to: to)
         }
-
-        gutterView.refresh()
-        workspaceView.sidebar.setRowFont(editorFont)
-        workspaceView.tabBar.setFont(editorFont)
-        applyLineNumbersVisibility()
-        updateCursorPositionLabel()
-
-        window.contentView = workspaceView
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(textView)
-
-        restoreLastSession()
-        updateTitle()
-        rebuildTabBar()
+        tabBar.onContextMenu = { [weak self] index, event in
+            self?.showTabContextMenu(forTabAt: index, event: event)
+        }
+        tabBar.onTabDropOutsideBar = { [weak self] sourceIndex, windowPoint in
+            return self?.onTabDropOutsideBar?(sourceIndex, windowPoint) ?? false
+        }
     }
 
-    private func restoreLastSession() {
-        let fm = FileManager.default
-        if let folder = AppState.lastFolder, fm.fileExists(atPath: folder.path) {
-            setRootFolder(folder)
+    // MARK: - View configuration
+
+    func applyTheme() {
+        textView.backgroundColor = Theme.background
+        textView.enclosingScrollView?.backgroundColor = Theme.background
+        tabBar.needsDisplay = true
+    }
+
+    func applyLineNumbersVisible(_ visible: Bool) {
+        gutterContainer.setGutterVisible(visible)
+    }
+
+    func setFont(_ font: NSFont) {
+        editorFont = font
+        textView.font = font
+        textView.typingAttributes = [
+            .font: font,
+            .foregroundColor: Theme.foreground
+        ]
+        for tab in tabs {
+            let full = NSRange(location: 0, length: tab.textStorage.length)
+            tab.textStorage.addAttribute(.font, value: font, range: full)
         }
-        if let file = AppState.lastFile, fm.fileExists(atPath: file.path) {
-            openOrFocus(url: file)
-        } else {
-            newUntitledTab()
+        if syntaxHighlightingEnabled, let tab = activeTab, let syntax = tab.activeSyntax {
+            syntax.highlight(tab.textStorage)
+        }
+        gutterView.gutterFont = font
+        gutterView.refresh()
+        tabBar.setFont(font)
+    }
+
+    func setSyntaxHighlighting(_ on: Bool) {
+        syntaxHighlightingEnabled = on
+        guard let tab = activeTab else { return }
+        let full = NSRange(location: 0, length: tab.textStorage.length)
+        tab.textStorage.removeAttribute(.foregroundColor, range: full)
+        tab.textStorage.addAttribute(.foregroundColor, value: Theme.foreground, range: full)
+        if on, let syntax = tab.activeSyntax {
+            syntax.highlight(tab.textStorage)
+        }
+    }
+
+    /// Re-apply syntax colors to every tab's storage. Called after settings
+    /// hot-reload changes the theme palette.
+    func reapplySyntaxColors() {
+        guard syntaxHighlightingEnabled else { return }
+        for tab in tabs {
+            let full = NSRange(location: 0, length: tab.textStorage.length)
+            tab.textStorage.removeAttribute(.foregroundColor, range: full)
+            tab.textStorage.addAttribute(.foregroundColor, value: Theme.foreground, range: full)
+            tab.activeSyntax?.highlight(tab.textStorage)
         }
     }
 
     // MARK: - Tab management
 
-    private func newUntitledTab() {
+    func newUntitledTab() {
         let tab = DocumentTab(url: nil, content: "", syntax: nil, font: editorFont)
         tab.textStorage.delegate = self
         tabs.append(tab)
         switchToTab(at: tabs.count - 1)
     }
 
-    /// If a tab already exists for this URL, focus it. Otherwise create a new tab,
-    /// load the file from disk, and switch to it.
-    private func openOrFocus(url: URL) {
+    /// Open `url` in this pane. If a tab for the URL already exists in this
+    /// pane, it is focused. If the active tab is an empty Untitled buffer, it
+    /// is replaced. Returns the loaded DocumentTab on success, nil on failure.
+    @discardableResult
+    func openOrFocus(url: URL, syntaxAutoEnableHandler: () -> Void) -> DocumentTab? {
         if let i = tabs.firstIndex(where: { $0.url == url }) {
             switchToTab(at: i)
-            return
+            return tabs[i]
         }
         do {
             let content = try String(contentsOf: url, encoding: .utf8)
@@ -221,7 +253,6 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             let tab = DocumentTab(url: url, content: content, syntax: syntax, font: editorFont)
             tab.textStorage.delegate = self
             tab.lineChanges = GitDiff.changes(for: url)
-            // Replace empty Untitled tab if user just opened the app to an empty buffer.
             if let i = activeTabIndex,
                let active = activeTab,
                active.url == nil, !active.dirty, active.textStorage.length == 0 {
@@ -232,72 +263,20 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
                 switchToTab(at: tabs.count - 1)
             }
             if syntax != nil && !syntaxHighlightingEnabled {
-                setSyntaxHighlighting(true)
+                syntaxAutoEnableHandler()
             } else if syntaxHighlightingEnabled {
                 syntax?.highlight(tab.textStorage)
             }
+            return tab
         } catch {
-            showError("Couldn't open file: \(error.localizedDescription)")
+            return nil
         }
     }
 
-    @objc func closeActiveTab(_ sender: Any?) {
-        guard let i = activeTabIndex else { return }
-        closeTab(at: i)
-    }
-
-    func closeTab(at index: Int) {
-        guard index >= 0, index < tabs.count else { return }
-        let tab = tabs[index]
-        if tab.dirty && !confirmDiscardTab(tab) { return }
-        tabs.remove(at: index)
-        if tabs.isEmpty {
-            activeTabIndex = nil
-            newUntitledTab()
-            return
-        }
-        // Prefer staying on the same index (now pointing at the next tab),
-        // clamp to last if we removed the rightmost.
-        let next = min(index, tabs.count - 1)
-        activeTabIndex = nil  // force switchToTab to swap storage even if next == old
-        switchToTab(at: next, force: true)
-    }
-
-    @objc func nextTab(_ sender: Any?) { cycleTab(by: +1) }
-    @objc func prevTab(_ sender: Any?) { cycleTab(by: -1) }
-
-    private func cycleTab(by delta: Int) {
-        guard !tabs.isEmpty, let i = activeTabIndex else { return }
-        let n = tabs.count
-        let next = ((i + delta) % n + n) % n
-        switchToTab(at: next)
-    }
-
-    /// Move a tab to a new position. Adjusts `activeTabIndex` so the same
-    /// document stays selected after the reorder.
-    private func reorderTab(from: Int, to: Int) {
-        guard from >= 0, from < tabs.count, to >= 0, to < tabs.count, from != to else { return }
-        let tab = tabs.remove(at: from)
-        tabs.insert(tab, at: to)
-
-        if let active = activeTabIndex {
-            if active == from {
-                activeTabIndex = to
-            } else if from < active && active <= to {
-                activeTabIndex = active - 1
-            } else if to <= active && active < from {
-                activeTabIndex = active + 1
-            }
-        }
-
-        rebuildTabBar()
-    }
-
-    private func switchToTab(at index: Int, force: Bool = false) {
+    func switchToTab(at index: Int, force: Bool = false) {
         guard index >= 0, index < tabs.count else { return }
         if !force, activeTabIndex == index { return }
 
-        // Save current tab's view state.
         if let active = activeTab {
             active.selectedRange = textView.selectedRange()
             active.scrollY = textView.enclosingScrollView?.contentView.bounds.origin.y ?? 0
@@ -324,17 +303,107 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             syntax.highlight(tab.textStorage)
         }
 
-        AppState.lastFile = tab.url
-        updateTitle()
-        gutterView?.setLineChanges(tab.lineChanges)
-        gutterView?.refresh()
-        refreshLanguageMenuChecks()
+        gutterView.setLineChanges(tab.lineChanges)
+        gutterView.refresh()
         rebuildTabBar()
+        updateCursorPositionLabel()
+        onActiveTabChanged?()
+        onTitleStateChanged?()
+    }
+
+    func closeTab(at index: Int) -> DocumentTab? {
+        guard index >= 0, index < tabs.count else { return nil }
+        let tab = tabs[index]
+        tabs.remove(at: index)
+        if tabs.isEmpty {
+            activeTabIndex = nil
+            onLastTabClosed?()
+            return tab
+        }
+        let next = min(index, tabs.count - 1)
+        activeTabIndex = nil
+        switchToTab(at: next, force: true)
+        return tab
+    }
+
+    func reorderTab(from: Int, to: Int) {
+        guard from >= 0, from < tabs.count, to >= 0, to < tabs.count, from != to else { return }
+        let tab = tabs.remove(at: from)
+        tabs.insert(tab, at: to)
+        if let active = activeTabIndex {
+            if active == from {
+                activeTabIndex = to
+            } else if from < active && active <= to {
+                activeTabIndex = active - 1
+            } else if to <= active && active < from {
+                activeTabIndex = active + 1
+            }
+        }
+        rebuildTabBar()
+    }
+
+    func cycleTab(by delta: Int) {
+        guard !tabs.isEmpty, let i = activeTabIndex else { return }
+        let n = tabs.count
+        let next = ((i + delta) % n + n) % n
+        switchToTab(at: next)
+    }
+
+    /// Detach a tab from this pane (used when transferring it to another pane).
+    /// Adjusts active index and switches to a remaining tab. Returns the tab.
+    func detachTab(at index: Int) -> DocumentTab? {
+        guard index >= 0, index < tabs.count else { return nil }
+        // Save view state on the active tab so it survives the transfer.
+        if let active = activeTab, activeTabIndex == index {
+            active.selectedRange = textView.selectedRange()
+            active.scrollY = textView.enclosingScrollView?.contentView.bounds.origin.y ?? 0
+        }
+        let tab = tabs.remove(at: index)
+        if tabs.isEmpty {
+            activeTabIndex = nil
+            rebuildTabBar()
+            onLastTabClosed?()
+            return tab
+        }
+        if let active = activeTabIndex {
+            if active == index {
+                activeTabIndex = nil
+                let next = min(index, tabs.count - 1)
+                switchToTab(at: next, force: true)
+            } else if active > index {
+                activeTabIndex = active - 1
+                rebuildTabBar()
+            } else {
+                rebuildTabBar()
+            }
+        }
+        return tab
+    }
+
+    /// Insert an externally-owned tab into this pane at `index` and focus it.
+    /// Used by the editor when transferring a tab from another pane.
+    func adoptTab(_ tab: DocumentTab, at index: Int) {
+        let clamped = max(0, min(index, tabs.count))
+        tab.textStorage.delegate = self
+        tabs.insert(tab, at: clamped)
+        // Re-apply current font to the adopted tab in case the source pane
+        // had a different size.
+        let full = NSRange(location: 0, length: tab.textStorage.length)
+        tab.textStorage.addAttribute(.font, value: editorFont, range: full)
+        switchToTab(at: clamped, force: true)
+    }
+
+    func rebuildTabBar() {
+        let items = tabs.map { TabBarItem(title: $0.displayName, dirty: $0.dirty) }
+        tabBar.update(items: items, activeIndex: activeTabIndex ?? -1)
+    }
+
+    /// Public helper: re-fire the cursor-position callback. Used by the editor
+    /// when a different pane gains focus so the sidebar reflects the new caret.
+    func pushCursorPosition() {
         updateCursorPositionLabel()
     }
 
-    /// Compute line/column from the current insertion point and push the
-    /// formatted readout into the sidebar footer.
     private func updateCursorPositionLabel() {
         let nsText = textView.string as NSString
         let location = min(textView.selectedRange().location, nsText.length)
@@ -350,15 +419,39 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             idx = r.location + r.length
         }
         let column = location - lineRange.location + 1
-        workspaceView?.sidebar.setCursorPosition("Ln \(line), Col \(column)")
+        onCursorPositionChanged?("Ln \(line), Col \(column)")
     }
 
-    private func rebuildTabBar() {
-        let items = tabs.map { TabBarItem(title: $0.displayName, dirty: $0.dirty) }
-        workspaceView?.tabBar.update(items: items, activeIndex: activeTabIndex ?? -1)
+    // MARK: - Right-click context menu on tabs
+
+    private func showTabContextMenu(forTabAt index: Int, event: NSEvent) {
+        let menu = NSMenu()
+        let splitV = NSMenuItem(title: "Split Vertically",
+                                action: #selector(handleSplitVertically(_:)),
+                                keyEquivalent: "")
+        splitV.target = self
+        splitV.representedObject = index
+        let splitH = NSMenuItem(title: "Split Horizontally",
+                                action: #selector(handleSplitHorizontally(_:)),
+                                keyEquivalent: "")
+        splitH.target = self
+        splitH.representedObject = index
+        menu.addItem(splitV)
+        menu.addItem(splitH)
+        NSMenu.popUpContextMenu(menu, with: event, for: tabBar)
     }
 
-    // MARK: NSTextViewDelegate
+    @objc private func handleSplitVertically(_ sender: NSMenuItem) {
+        guard let idx = sender.representedObject as? Int else { return }
+        onSplitRequested?(.horizontal, idx)
+    }
+
+    @objc private func handleSplitHorizontally(_ sender: NSMenuItem) {
+        guard let idx = sender.representedObject as? Int else { return }
+        onSplitRequested?(.vertical, idx)
+    }
+
+    // MARK: - NSTextViewDelegate
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
@@ -386,7 +479,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
                   replacementString: String?) -> Bool {
         guard let str = replacementString, str.count == 1,
               let opener = str.first,
-              let closer = Editor.autoPairs[opener] else { return true }
+              let closer = Pane.autoPairs[opener] else { return true }
 
         let nsText = textView.string as NSString
 
@@ -403,7 +496,6 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         let middle = affectedCharRange.length > 0
             ? nsText.substring(with: affectedCharRange)
             : ""
-
         let insertion = "\(opener)\(middle)\(closer)"
         textView.insertText(insertion, replacementRange: affectedCharRange)
 
@@ -438,15 +530,14 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
         var insertion = "\n" + leading
         if opensBlock {
-            let key = activeSyntax?.key ?? ""
+            let key = activeTab?.activeSyntax?.key ?? ""
             let cfg = SettingsStore.indentByLanguage[key] ?? IndentConfig.fallback
             insertion += cfg.unitString
         }
-
         textView.insertText(insertion, replacementRange: selRange)
     }
 
-    // MARK: NSTextStorageDelegate
+    // MARK: - NSTextStorageDelegate
 
     func textStorage(
         _ textStorage: NSTextStorage,
@@ -459,27 +550,370 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         if !tab.dirty {
             tab.dirty = true
             rebuildTabBar()
-            if tab === activeTab { updateTitle() }
+            if tab === activeTab { onTitleStateChanged?() }
         }
         if syntaxHighlightingEnabled, let syntax = tab.activeSyntax {
             syntax.highlight(textStorage)
         }
         if tab === activeTab {
-            gutterView?.refresh()
+            gutterView.refresh()
+        }
+    }
+}
+
+// MARK: - Editor (window-level coordinator)
+
+final class Editor: NSObject, NSWindowDelegate {
+    var window: NSWindow!
+    var workspaceView: WorkspaceView!
+
+    private(set) var panes: [Pane] = []
+    private(set) var focusedPane: Pane!
+
+    /// Convenience accessors on the focused pane.
+    var activeTab: DocumentTab? { focusedPane?.activeTab }
+    var currentURL: URL? { activeTab?.url }
+    var dirty: Bool { activeTab?.dirty ?? false }
+    var activeSyntax: Syntax? { activeTab?.activeSyntax }
+
+    static let minFontSize: CGFloat = 8
+    static let maxFontSize: CGFloat = 32
+    private var currentFontSize: CGFloat = 13
+    private var editorFont: NSFont
+    var syntaxHighlightingEnabled = false
+    weak var syntaxHighlightingMenuItem: NSMenuItem?
+    weak var lineNumbersMenuItem: NSMenuItem?
+    weak var languageMenu: NSMenu?
+
+    override init() {
+        self.editorFont = Editor.makeFont(size: 13)
+        super.init()
+    }
+
+    private static func makeFont(size: CGFloat) -> NSFont {
+        return NSFont(name: "Menlo", size: size)
+            ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    }
+
+    func setup() {
+        let frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        window = NSWindow(
+            contentRect: frame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = Theme.background
+        window.center()
+        window.delegate = self
+        window.isReleasedWhenClosed = false
+
+        let firstPane = makePane()
+        panes = [firstPane]
+        focusedPane = firstPane
+
+        workspaceView = WorkspaceView(initialPaneView: firstPane.paneView)
+        workspaceView.frame = frame
+        workspaceView.autoresizingMask = [.width, .height]
+
+        workspaceView.sidebar.onSelect = { [weak self] url in
+            self?.openOrFocus(url: url)
+        }
+        workspaceView.sidebar.onRename = { [weak self] oldURL, newURL in
+            self?.handleSidebarRename(from: oldURL, to: newURL)
+        }
+        workspaceView.sidebar.onExternalChange = { [weak self] in
+            self?.refreshActiveLineChanges()
+        }
+
+        workspaceView.sidebar.setRowFont(editorFont)
+        applyLineNumbersVisibility()
+
+        window.contentView = workspaceView
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(firstPane.textView)
+
+        restoreLastSession()
+        updateTitle()
+        firstPane.rebuildTabBar()
+    }
+
+    /// Construct and wire a new pane.
+    private func makePane() -> Pane {
+        let pane = Pane(font: editorFont)
+        pane.syntaxHighlightingEnabled = syntaxHighlightingEnabled
+        wirePane(pane)
+        return pane
+    }
+
+    private func wirePane(_ pane: Pane) {
+        pane.onActivated = { [weak self, weak pane] in
+            guard let self = self, let pane = pane else { return }
+            self.setFocusedPane(pane)
+        }
+        pane.onCursorPositionChanged = { [weak self, weak pane] text in
+            guard let self = self, let pane = pane, pane === self.focusedPane else { return }
+            self.workspaceView?.sidebar.setCursorPosition(text)
+        }
+        pane.onActiveTabChanged = { [weak self, weak pane] in
+            guard let self = self, let pane = pane, pane === self.focusedPane else { return }
+            AppState.lastFile = pane.activeTab?.url
+            self.refreshLanguageMenuChecks()
+        }
+        pane.onTitleStateChanged = { [weak self, weak pane] in
+            guard let self = self, let pane = pane, pane === self.focusedPane else { return }
+            self.updateTitle()
+        }
+        pane.onLastTabClosed = { [weak self, weak pane] in
+            guard let self = self, let pane = pane else { return }
+            self.handlePaneEmptied(pane)
+        }
+        pane.onSplitRequested = { [weak self, weak pane] orientation, tabIndex in
+            guard let self = self, let pane = pane else { return }
+            self.splitPane(pane, takingTabAt: tabIndex, orientation: orientation)
+        }
+        pane.onTabDropOutsideBar = { [weak self, weak pane] sourceIndex, windowPoint in
+            guard let self = self, let pane = pane else { return false }
+            return self.handleCrossPaneDrop(from: pane, sourceIndex: sourceIndex, windowPoint: windowPoint)
+        }
+        pane.onTabCloseRequested = { [weak self, weak pane] index in
+            guard let self = self, let pane = pane else { return }
+            self.closeTab(in: pane, at: index)
         }
     }
 
-    // MARK: Title
+    private func setFocusedPane(_ pane: Pane) {
+        guard pane !== focusedPane else { return }
+        focusedPane = pane
+        updateTitle()
+        refreshLanguageMenuChecks()
+        AppState.lastFile = pane.activeTab?.url
+        // Push the new pane's cursor position to the sidebar so the footer
+        // tracks the focused pane rather than the previous one.
+        pane.pushCursorPosition()
+        // If activation came from a tab-bar click rather than a textView
+        // click, the pane's text view still needs to take first-responder so
+        // typing lands in the right pane.
+        if window?.firstResponder !== pane.textView {
+            window?.makeFirstResponder(pane.textView)
+        }
+    }
+
+    private func restoreLastSession() {
+        let fm = FileManager.default
+        if let folder = AppState.lastFolder, fm.fileExists(atPath: folder.path) {
+            setRootFolder(folder)
+        }
+        if let file = AppState.lastFile, fm.fileExists(atPath: file.path) {
+            openOrFocus(url: file)
+        } else {
+            focusedPane.newUntitledTab()
+        }
+    }
+
+    // MARK: - File open/close routing
+
+    private func openOrFocus(url: URL) {
+        // If the URL is open in any pane already, focus that pane and tab.
+        for pane in panes {
+            if let i = pane.tabs.firstIndex(where: { $0.url == url }) {
+                setFocusedPane(pane)
+                pane.switchToTab(at: i)
+                window.makeFirstResponder(pane.textView)
+                return
+            }
+        }
+        let result = focusedPane.openOrFocus(url: url) { [weak self] in
+            self?.setSyntaxHighlighting(true)
+        }
+        if result == nil {
+            showError("Couldn't open file at \(url.path)")
+        }
+    }
+
+    @objc func closeActiveTab(_ sender: Any?) {
+        guard let i = focusedPane.activeTabIndex else { return }
+        closeTab(in: focusedPane, at: i)
+    }
+
+    private func closeTab(in pane: Pane, at index: Int) {
+        guard index >= 0, index < pane.tabs.count else { return }
+        let tab = pane.tabs[index]
+        if tab.dirty && !confirmDiscardTab(tab, in: pane) { return }
+        _ = pane.closeTab(at: index)
+    }
+
+    /// A pane reported its last tab was closed. If it's the only pane, open a
+    /// fresh untitled tab. Otherwise remove the pane and collapse the split.
+    private func handlePaneEmptied(_ pane: Pane) {
+        if panes.count <= 1 {
+            pane.newUntitledTab()
+            return
+        }
+        removePane(pane)
+    }
+
+    private func removePane(_ pane: Pane) {
+        guard let idx = panes.firstIndex(where: { $0 === pane }) else { return }
+        workspaceView.removePane(pane.paneView)
+        panes.remove(at: idx)
+        let next = panes.first!
+        focusedPane = next
+        window.makeFirstResponder(next.textView)
+        updateTitle()
+        refreshLanguageMenuChecks()
+        AppState.lastFile = next.activeTab?.url
+    }
+
+    // MARK: - Splitting
+
+    /// Move tab at `tabIndex` from `source` into a new pane created in the
+    /// given orientation (NSSplitView.isVertical flag — `.vertical` means the
+    /// divider runs vertically i.e. side-by-side panes).
+    private func splitPane(_ source: Pane,
+                           takingTabAt tabIndex: Int,
+                           orientation: NSUserInterfaceLayoutOrientation) {
+        // A split needs at least 2 tabs in the source pane (otherwise the
+        // source would be left empty), and we only allow a single split.
+        guard panes.count < 2, source.tabs.count > 1 else { return }
+        guard let detached = source.detachTab(at: tabIndex) else { return }
+        let newPane = makePane()
+        panes.append(newPane)
+        workspaceView.addPane(newPane.paneView, orientation: orientation)
+        newPane.adoptTab(detached, at: 0)
+        newPane.setFont(editorFont)
+        newPane.setSyntaxHighlighting(syntaxHighlightingEnabled)
+        newPane.applyLineNumbersVisible(SettingsStore.showLineNumbers)
+        focusedPane = newPane
+        window.makeFirstResponder(newPane.textView)
+        updateTitle()
+    }
+
+    /// Cmd+T action. If there's only one pane, create a new split (in the
+    /// settings-configured orientation) with an empty untitled tab. If a split
+    /// already exists, add the untitled tab to the *other* pane.
+    @objc func newSplit(_ sender: Any?) {
+        if panes.count >= 2 {
+            let other = panes.first(where: { $0 !== focusedPane }) ?? focusedPane!
+            other.newUntitledTab()
+            focusedPane = other
+            window.makeFirstResponder(other.textView)
+            updateTitle()
+            return
+        }
+        let orientation = SettingsStore.splitOrientation
+        let newPane = makePane()
+        panes.append(newPane)
+        workspaceView.addPane(newPane.paneView, orientation: orientation)
+        newPane.setFont(editorFont)
+        newPane.setSyntaxHighlighting(syntaxHighlightingEnabled)
+        newPane.applyLineNumbersVisible(SettingsStore.showLineNumbers)
+        newPane.newUntitledTab()
+        focusedPane = newPane
+        window.makeFirstResponder(newPane.textView)
+        updateTitle()
+    }
+
+    // MARK: - Cross-pane tab dragging
+
+    /// Called by a pane when a tab drag ends with the cursor outside its own
+    /// tab bar. Returns true if we transferred the tab to another pane.
+    private func handleCrossPaneDrop(from source: Pane,
+                                     sourceIndex: Int,
+                                     windowPoint: NSPoint) -> Bool {
+        guard let target = paneForTabBarHit(windowPoint: windowPoint),
+              target !== source else {
+            return false
+        }
+        let pointInTargetBar = target.tabBar.convert(windowPoint, from: nil)
+        let insertIndex = insertionIndex(in: target.tabBar, atX: pointInTargetBar.x)
+        guard let detached = source.detachTab(at: sourceIndex) else { return false }
+        target.adoptTab(detached, at: insertIndex)
+        focusedPane = target
+        window.makeFirstResponder(target.textView)
+        updateTitle()
+        return true
+    }
+
+    private func paneForTabBarHit(windowPoint: NSPoint) -> Pane? {
+        for pane in panes {
+            let inBar = pane.tabBar.convert(windowPoint, from: nil)
+            if pane.tabBar.bounds.contains(inBar) {
+                return pane
+            }
+        }
+        return nil
+    }
+
+    /// Find where to insert a transferred tab in `bar` given the drop x.
+    private func insertionIndex(in bar: TabBarView, atX x: CGFloat) -> Int {
+        let items = bar.arrangedTabViews
+        if items.isEmpty { return 0 }
+        for (i, view) in items.enumerated() {
+            if x < view.frame.midX { return i }
+        }
+        return items.count
+    }
+
+    // MARK: - Tab cycling
+
+    @objc func nextTab(_ sender: Any?) { focusedPane.cycleTab(by: +1) }
+    @objc func prevTab(_ sender: Any?) { focusedPane.cycleTab(by: -1) }
+
+    // MARK: - Sidebar interaction
+
+    private func handleSidebarRename(from oldURL: URL, to newURL: URL) {
+        for pane in panes {
+            for tab in pane.tabs where tab.url == oldURL {
+                tab.url = newURL
+                let next = Syntax.from(url: newURL)
+                if next != tab.activeSyntax {
+                    tab.activeSyntax = next
+                    if syntaxHighlightingEnabled {
+                        let full = NSRange(location: 0, length: tab.textStorage.length)
+                        tab.textStorage.removeAttribute(.foregroundColor, range: full)
+                        tab.textStorage.addAttribute(.foregroundColor,
+                                                    value: Theme.foreground,
+                                                    range: full)
+                        next?.highlight(tab.textStorage)
+                    }
+                }
+            }
+            pane.rebuildTabBar()
+        }
+        if focusedPane.activeTab?.url == newURL {
+            updateTitle()
+            refreshLanguageMenuChecks()
+            AppState.lastFile = newURL
+        }
+    }
+
+    private func refreshActiveLineChanges() {
+        for pane in panes {
+            guard let tab = pane.activeTab, let url = tab.url else { continue }
+            DispatchQueue.global(qos: .utility).async {
+                let changes = GitDiff.changes(for: url)
+                DispatchQueue.main.async {
+                    tab.lineChanges = changes
+                    pane.gutterView.setLineChanges(changes)
+                }
+            }
+        }
+    }
+
+    // MARK: - Title
 
     func updateTitle() {
         let name = currentURL?.lastPathComponent ?? "Untitled"
         window.title = "\(dirty ? "● " : "")\(name) — Kantan"
     }
 
-    // MARK: File actions
+    // MARK: - File actions
 
     @objc func newDocument(_ sender: Any?) {
-        newUntitledTab()
+        focusedPane.newUntitledTab()
     }
 
     @objc func openDocument(_ sender: Any?) {
@@ -508,92 +942,61 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         AppState.lastFolder = url
     }
 
-    @objc func toggleSidebar(_ sender: Any?) {
-        workspaceView.toggleSidebar()
-    }
-
-    @objc func refreshSidebar(_ sender: Any?) {
-        workspaceView.refreshSidebar()
-    }
+    @objc func toggleSidebar(_ sender: Any?) { workspaceView.toggleSidebar() }
+    @objc func refreshSidebar(_ sender: Any?) { workspaceView.refreshSidebar() }
 
     @objc func saveDocument(_ sender: Any?) {
-        if let url = activeTab?.url {
-            saveTo(url: url)
+        guard let tab = focusedPane.activeTab else { return }
+        if let url = tab.url {
+            saveTo(url: url, tab: tab, in: focusedPane)
         } else {
-            _ = saveAs()
+            _ = saveAs(in: focusedPane)
         }
     }
 
     @objc func saveDocumentAs(_ sender: Any?) {
-        _ = saveAs()
-    }
-
-    private func handleSidebarRename(from oldURL: URL, to newURL: URL) {
-        for tab in tabs where tab.url == oldURL {
-            tab.url = newURL
-            let next = Syntax.from(url: newURL)
-            if next != tab.activeSyntax {
-                tab.activeSyntax = next
-                if syntaxHighlightingEnabled {
-                    let full = NSRange(location: 0, length: tab.textStorage.length)
-                    tab.textStorage.removeAttribute(.foregroundColor, range: full)
-                    tab.textStorage.addAttribute(.foregroundColor, value: Theme.foreground, range: full)
-                    next?.highlight(tab.textStorage)
-                }
-            }
-        }
-        if activeTab?.url == newURL {
-            updateTitle()
-            refreshLanguageMenuChecks()
-            AppState.lastFile = newURL
-        }
-        rebuildTabBar()
+        _ = saveAs(in: focusedPane)
     }
 
     @discardableResult
-    private func saveAs() -> Bool {
-        guard let tab = activeTab else { return false }
+    private func saveAs(in pane: Pane) -> Bool {
+        guard let tab = pane.activeTab else { return false }
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
         panel.nameFieldStringValue = tab.url?.lastPathComponent ?? "untitled.rb"
         if panel.runModal() == .OK, let url = panel.url {
             tab.url = url
-            saveTo(url: url)
+            saveTo(url: url, tab: tab, in: pane)
             workspaceView?.sidebar.refreshDirectory(containing: url)
             return true
         }
         return false
     }
 
-    private func saveTo(url: URL) {
-        guard let tab = activeTab else { return }
+    private func saveTo(url: URL, tab: DocumentTab, in pane: Pane) {
         do {
-            try textView.string.write(to: url, atomically: true, encoding: .utf8)
+            try pane.textView.string.write(to: url, atomically: true, encoding: .utf8)
             tab.dirty = false
             tab.url = url
             updateTitle()
-            selectSyntax(for: url)
+            selectSyntax(for: url, in: pane)
             AppState.lastFile = url
             tab.lineChanges = GitDiff.changes(for: url)
-            gutterView?.setLineChanges(tab.lineChanges)
+            pane.gutterView.setLineChanges(tab.lineChanges)
             workspaceView?.sidebar.markFile(url, hasChanges: !tab.lineChanges.isEmpty)
-            rebuildTabBar()
+            pane.rebuildTabBar()
             if url == SettingsStore.fileURL {
                 SettingsStore.loadAndApply()
-                if syntaxHighlightingEnabled, let syntax = tab.activeSyntax {
-                    syntax.highlight(tab.textStorage)
-                }
+                for p in panes { p.reapplySyntaxColors() }
                 applyLineNumbersVisibility()
                 applyWorkspaceTheme()
             }
-            // The sidebar filename color was already updated via markFile above.
-            // The async file-system watcher will do a full git status refresh later.
         } catch {
             showError("Couldn't save file: \(error.localizedDescription)")
         }
     }
 
-    // MARK: Font sizing
+    // MARK: - Font sizing
 
     @objc func increaseTextSize(_ sender: Any?) {
         let next = min(currentFontSize + 1, Editor.maxFontSize)
@@ -611,27 +1014,11 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
     private func applyEditorFont() {
         editorFont = Editor.makeFont(size: currentFontSize)
-        textView.font = editorFont
-        textView.typingAttributes = [
-            .font: editorFont,
-            .foregroundColor: Theme.foreground
-        ]
-        // Push the new font into every tab's storage so inactive tabs don't snap
-        // to the old size when the user switches to them.
-        for tab in tabs {
-            let full = NSRange(location: 0, length: tab.textStorage.length)
-            tab.textStorage.addAttribute(.font, value: editorFont, range: full)
-        }
-        if syntaxHighlightingEnabled, let tab = activeTab, let syntax = tab.activeSyntax {
-            syntax.highlight(tab.textStorage)
-        }
-        gutterView?.gutterFont = editorFont
-        gutterView?.refresh()
+        for pane in panes { pane.setFont(editorFont) }
         workspaceView?.sidebar.setRowFont(editorFont)
-        workspaceView?.tabBar.setFont(editorFont)
     }
 
-    // MARK: Syntax highlighting toggle
+    // MARK: - Syntax / line numbers / theme
 
     @objc func toggleSyntaxHighlighting(_ sender: Any?) {
         setSyntaxHighlighting(!syntaxHighlightingEnabled)
@@ -649,32 +1036,23 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
     private func applyWorkspaceTheme() {
         window.backgroundColor = Theme.background
-        textView.backgroundColor = Theme.background
-        textView.enclosingScrollView?.backgroundColor = Theme.background
+        for pane in panes { pane.applyTheme() }
         workspaceView?.sidebar.applyTheme()
-        workspaceView?.tabBar.needsDisplay = true
     }
 
     private func applyLineNumbersVisibility() {
-        workspaceView?.gutterContainer.setGutterVisible(SettingsStore.showLineNumbers)
+        for pane in panes { pane.applyLineNumbersVisible(SettingsStore.showLineNumbers) }
         lineNumbersMenuItem?.state = SettingsStore.showLineNumbers ? .on : .off
     }
 
     private func setSyntaxHighlighting(_ on: Bool) {
         syntaxHighlightingEnabled = on
         syntaxHighlightingMenuItem?.state = on ? .on : .off
-        guard let tab = activeTab else { return }
-        let full = NSRange(location: 0, length: tab.textStorage.length)
-        tab.textStorage.removeAttribute(.foregroundColor, range: full)
-        tab.textStorage.addAttribute(.foregroundColor, value: Theme.foreground, range: full)
-        if on, let syntax = tab.activeSyntax {
-            syntax.highlight(tab.textStorage)
-        }
+        for pane in panes { pane.setSyntaxHighlighting(on) }
     }
 
-    /// Adjust the active tab's syntax to match the file's extension.
-    private func selectSyntax(for url: URL) {
-        guard let tab = activeTab else { return }
+    private func selectSyntax(for url: URL, in pane: Pane) {
+        guard let tab = pane.activeTab else { return }
         let next = Syntax.from(url: url)
         let changed = next != tab.activeSyntax
         tab.activeSyntax = next
@@ -691,12 +1069,12 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         }
     }
 
-    // MARK: Language selection
+    // MARK: - Language selection
 
     @objc func selectLanguage(_ sender: Any?) {
         guard let item = sender as? NSMenuItem,
               let syntax = Syntax(rawValue: item.tag),
-              let tab = activeTab else { return }
+              let tab = focusedPane.activeTab else { return }
         if syntax == tab.activeSyntax && syntaxHighlightingEnabled { return }
         tab.activeSyntax = syntax
         refreshLanguageMenuChecks()
@@ -718,13 +1096,13 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         }
     }
 
-    // MARK: Settings
+    // MARK: - Settings
 
     @objc func openSettings(_ sender: Any?) {
         openOrFocus(url: SettingsStore.fileURL)
     }
 
-    private func confirmDiscardTab(_ tab: DocumentTab) -> Bool {
+    private func confirmDiscardTab(_ tab: DocumentTab, in pane: Pane) -> Bool {
         let alert = NSAlert()
         alert.messageText = "Save changes to \(tab.displayName)?"
         alert.informativeText = "Your changes will be lost if you don't save them."
@@ -734,9 +1112,8 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            // Make this tab active so saveDocument/saveAs operates on it.
-            if let i = tabs.firstIndex(where: { $0 === tab }) {
-                switchToTab(at: i, force: true)
+            if let i = pane.tabs.firstIndex(where: { $0 === tab }) {
+                pane.switchToTab(at: i, force: true)
             }
             saveDocument(nil)
             return !tab.dirty
@@ -754,16 +1131,17 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         alert.runModal()
     }
 
-    // MARK: NSWindowDelegate
+    // MARK: - NSWindowDelegate
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         return promptSaveBeforeClose()
     }
 
-    /// Walk the tab list, prompt for each dirty tab. Bail on first cancel.
     func promptSaveBeforeClose() -> Bool {
-        for tab in tabs where tab.dirty {
-            if !confirmDiscardTab(tab) { return false }
+        for pane in panes {
+            for tab in pane.tabs where tab.dirty {
+                if !confirmDiscardTab(tab, in: pane) { return false }
+            }
         }
         return true
     }

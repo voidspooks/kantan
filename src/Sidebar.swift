@@ -1029,11 +1029,19 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
 
 // MARK: - Workspace (sidebar + gutter container, splittable)
 
+/// NSSplitView that paints its divider with `Theme.gutterBorder` so the line
+/// between split panes matches the rest of the app's gray accents instead of
+/// the system default.
+final class EditorAreaSplitView: NSSplitView {
+    override var dividerColor: NSColor { Theme.gutterBorder }
+    override var dividerThickness: CGFloat { 1 }
+}
+
 final class WorkspaceView: NSSplitView, NSSplitViewDelegate {
     let sidebar: SidebarView
-    let editorPane: EditorPaneView
-    var gutterContainer: GutterContainerView { editorPane.gutterContainer }
-    var tabBar: TabBarView { editorPane.tabBar }
+    /// Inner split view that holds the editor pane(s). Holds 1 pane initially;
+    /// a second pane is added when the user splits.
+    let editorArea: EditorAreaSplitView
     private(set) var currentFolder: URL?
     private var savedSidebarWidth: CGFloat = 220
     private let defaultSidebarWidth: CGFloat = 220
@@ -1042,17 +1050,42 @@ final class WorkspaceView: NSSplitView, NSSplitViewDelegate {
 
     override var dividerColor: NSColor { Theme.gutterBorder }
 
-    init(editorPane: EditorPaneView) {
+    init(initialPaneView: EditorPaneView) {
         self.sidebar = SidebarView(frame: .zero)
-        self.editorPane = editorPane
+        self.editorArea = EditorAreaSplitView()
         super.init(frame: .zero)
+        editorArea.isVertical = true
+        editorArea.dividerStyle = .thin
+        editorArea.translatesAutoresizingMaskIntoConstraints = false
+        editorArea.addArrangedSubview(initialPaneView)
+
         isVertical = true
         dividerStyle = .thin
         delegate = self
         addSubview(sidebar)
-        addSubview(editorPane)
+        addSubview(editorArea)
         setHoldingPriority(.defaultHigh, forSubviewAt: 0)
         setHoldingPriority(.defaultLow,  forSubviewAt: 1)
+    }
+
+    /// Add a new pane view to the editor area. `orientation` describes the
+    /// axis along which the panes are arranged: `.horizontal` puts them
+    /// side-by-side (a vertical divider — what the user calls "split
+    /// vertically"); `.vertical` stacks them top/bottom (a horizontal divider
+    /// — "split horizontally").
+    func addPane(_ paneView: EditorPaneView, orientation: NSUserInterfaceLayoutOrientation) {
+        // NSSplitView.isVertical = true draws vertical dividers (panes side-by-side).
+        editorArea.isVertical = (orientation == .horizontal)
+        editorArea.addArrangedSubview(paneView)
+        editorArea.layoutSubtreeIfNeeded()
+        // Even split between the two panes.
+        let total = editorArea.isVertical ? editorArea.bounds.width : editorArea.bounds.height
+        editorArea.setPosition(total / 2, ofDividerAt: 0)
+    }
+
+    func removePane(_ paneView: EditorPaneView) {
+        editorArea.removeArrangedSubview(paneView)
+        paneView.removeFromSuperview()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }

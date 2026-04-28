@@ -74,6 +74,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newItem = NSMenuItem(title: "New", action: #selector(Editor.newDocument(_:)), keyEquivalent: "n")
         newItem.target = editor
         fileMenu.addItem(newItem)
+        let newSplitItem = NSMenuItem(title: "New Split",
+                                      action: #selector(Editor.newSplit(_:)),
+                                      keyEquivalent: "t")
+        newSplitItem.target = editor
+        fileMenu.addItem(newSplitItem)
         let openItem = NSMenuItem(title: "Open…", action: #selector(Editor.openDocument(_:)), keyEquivalent: "o")
         openItem.target = editor
         fileMenu.addItem(openItem)
