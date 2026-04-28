@@ -56,8 +56,8 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private let scrollView: NSScrollView
     private var rootNode: FileNode?
 
-    private let cellFont: NSFont = NSFont(name: "Menlo", size: 12)
-        ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private var cellFont: NSFont = NSFont(name: "Menlo", size: 13)
+        ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
     /// Fired when the user clicks a file row (not a directory).
     var onSelect: ((URL) -> Void)?
@@ -76,7 +76,8 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         outlineView.backgroundColor = Theme.sidebarBackground
         outlineView.usesAlternatingRowBackgroundColors = false
         outlineView.indentationPerLevel = 14
-        outlineView.rowSizeStyle = .small
+        outlineView.rowSizeStyle = .custom
+        outlineView.rowHeight = ceil(cellFont.boundingRectForFont.height) + 4
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.target = self
@@ -100,6 +101,16 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    func setRowFont(_ font: NSFont) {
+        cellFont = font
+        applyRowHeight()
+        outlineView.reloadData()
+    }
+
+    private func applyRowHeight() {
+        outlineView.rowHeight = ceil(cellFont.boundingRectForFont.height) + 4
+    }
 
     func setRoot(_ url: URL?) {
         if let url = url {
@@ -187,6 +198,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             ])
         }
         cell.textField?.stringValue = node.displayName
+        cell.textField?.font = cellFont
         return cell
     }
 }
