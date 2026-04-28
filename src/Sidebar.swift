@@ -1,5 +1,8 @@
 import AppKit
 import CoreServices
+import os.log
+
+private let sidebarLog = OSLog(subsystem: "com.kantan.editor", category: "Sidebar")
 
 // MARK: - FSEvents directory watcher
 
@@ -45,8 +48,10 @@ final class DirectoryWatcher {
     }
 
     private func scheduleDebouncedCallback() {
+        os_log(.info, log: sidebarLog, "FSEvents fired — scheduling debounced callback (%.1f s)", debounceInterval)
         debounceItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
+            os_log(.info, log: sidebarLog, "Debounce timer fired — calling watcher callback")
             self?.callback()
         }
         debounceItem = item
@@ -334,15 +339,18 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     }
 
     func setRoot(_ url: URL?) {
+        os_log(.info, log: sidebarLog, "setRoot: %{public}@", url?.path ?? "<nil>")
         directoryWatcher?.stop()
         directoryWatcher = nil
 
         if let url = url {
             rootNode = FileNode(url: url)
             directoryWatcher = DirectoryWatcher(directory: url) { [weak self] in
+                os_log(.info, log: sidebarLog, "DirectoryWatcher callback invoked")
                 self?.refreshGitStatusAsync()
                 self?.onExternalChange?()
             }
+            os_log(.info, log: sidebarLog, "DirectoryWatcher created for %{public}@", url.path)
         } else {
             rootNode = nil
         }
@@ -361,6 +369,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
 
     /// Re-read git status without touching the file tree.
     func refreshGitStatus() {
+        os_log(.info, log: sidebarLog, "refreshGitStatus() called (sync)")
         gitStatus.refresh()
         updateBranchFooter()
         reloadVisibleRowColors()
@@ -369,9 +378,14 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// Non-blocking variant used by the file system watcher. Runs `git status`
     /// on a background queue and dispatches UI updates back to the main thread.
     private func refreshGitStatusAsync() {
+        os_log(.info, log: sidebarLog, "refreshGitStatusAsync() dispatching to background")
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            os_log(.info, log: sidebarLog, "refreshGitStatusAsync() background — calling gitStatus.refresh()")
             self?.gitStatus.refresh()
             DispatchQueue.main.async { [weak self] in
+                os_log(.info, log: sidebarLog, "refreshGitStatusAsync() main thread — updating UI, clearing %d diff overrides",
+                       self?.diffOverrides.count ?? 0)
+                self?.diffOverrides.removeAll()
                 self?.updateBranchFooter()
                 self?.reloadVisibleRowColors()
             }
@@ -382,11 +396,17 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// destroys selection, first responder, and inline-rename state).
     private func reloadVisibleRowColors() {
         let visible = outlineView.rows(in: outlineView.visibleRect)
+        os_log(.info, log: sidebarLog, "reloadVisibleRowColors() — %d visible rows (loc=%d len=%d)",
+               visible.length, visible.location, visible.length)
+        var colored = 0
         for row in visible.location..<(visible.location + visible.length) {
             guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCellView,
                   let node = outlineView.item(atRow: row) as? FileNode else { continue }
-            cell.textField?.textColor = textColor(for: node)
+            let color = textColor(for: node)
+            cell.textField?.textColor = color
+            if color != Theme.sidebarText { colored += 1 }
         }
+        os_log(.info, log: sidebarLog, "reloadVisibleRowColors() — %d rows colored", colored)
     }
 
     /// One-time wiring of the divider + branch row subviews. Layout constraints
@@ -869,6 +889,8 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// Mark a file as modified (has changes) or clean based on diff results.
     /// Immediately updates visible row colors so the filename color updates.
     func markFile(_ url: URL, hasChanges: Bool) {
+        os_log(.info, log: sidebarLog, "markFile(%{public}@, hasChanges: %{public}@)",
+               url.lastPathComponent, hasChanges ? "true" : "false")
         diffOverrides[url.path] = hasChanges
         reloadVisibleRowColors()
     }
@@ -878,9 +900,17 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// git considers modified.
     private func textColor(for node: FileNode) -> NSColor {
         if let override = diffOverrides[node.url.path] {
+            os_log(.info, log: sidebarLog, "textColor(%{public}@) override=%{public}@",
+                   node.url.lastPathComponent, override ? "modified" : "clean")
             return override ? Theme.gitModified : Theme.sidebarText
         }
-        switch gitStatus.status(for: node.url) {
+        let result = gitStatus.status(for: node.url)
+        if result != nil {
+            os_log(.info, log: sidebarLog, "textColor(%{public}@) git=%{public}@",
+                   node.url.lastPathComponent,
+                   result == .untracked ? "untracked" : "modified")
+        }
+        switch result {
         case .untracked: return Theme.gitUntracked
         case .modified:  return Theme.gitModified
         case nil:        return Theme.sidebarText

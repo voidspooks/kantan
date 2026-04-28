@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let gitLog = OSLog(subsystem: "com.kantan.editor", category: "GitStatus")
 
 // MARK: - Git status (per-file untracked/modified flags)
 
@@ -24,6 +27,7 @@ final class GitStatus {
     private(set) var currentBranch: String?
 
     func setRoot(_ url: URL?) {
+        os_log(.info, log: gitLog, "setRoot called: %{public}@", url?.path ?? "<nil>")
         lock.lock()
         rootURL = url
         lock.unlock()
@@ -31,19 +35,33 @@ final class GitStatus {
     }
 
     func refresh() {
+        let start = CFAbsoluteTimeGetCurrent()
+        os_log(.info, log: gitLog, "refresh() called on thread %{public}@",
+               Thread.isMainThread ? "MAIN" : "background")
         lock.lock()
         statuses = [:]
         currentBranch = nil
         let root = rootURL
         lock.unlock()
-        guard let root = root else { return }
+        guard let root = root else {
+            os_log(.info, log: gitLog, "refresh() bailing — rootURL is nil")
+            return
+        }
 
-        guard let statusOutput = runGit(["status", "--porcelain"], in: root) else { return }
+        os_log(.info, log: gitLog, "refresh() running git status for root: %{public}@", root.path)
+        guard let statusOutput = runGit(["status", "--porcelain"], in: root) else {
+            os_log(.error, log: gitLog, "refresh() git status returned nil (not a repo or error)")
+            return
+        }
+        let statusElapsed = CFAbsoluteTimeGetCurrent() - start
+        os_log(.info, log: gitLog, "refresh() git status took %.3f s, output length: %d",
+               statusElapsed, statusOutput.count)
 
         if let branch = runGit(["branch", "--show-current"], in: root), !branch.isEmpty {
             lock.lock()
             currentBranch = branch
             lock.unlock()
+            os_log(.info, log: gitLog, "refresh() branch: %{public}@", branch)
         }
 
         var newStatuses: [String: Kind] = [:]
@@ -62,8 +80,15 @@ final class GitStatus {
             if path.hasSuffix("/") { path = String(path.dropLast()) }
 
             let absolute = root.appendingPathComponent(path).path
-            newStatuses[absolute] = (xy == "??" ? .untracked : .modified)
+            let kind: Kind = (xy == "??" ? .untracked : .modified)
+            newStatuses[absolute] = kind
+            os_log(.info, log: gitLog, "  parsed: [%{public}@] absolute=%{public}@",
+                   xy, absolute)
         }
+
+        let totalElapsed = CFAbsoluteTimeGetCurrent() - start
+        os_log(.info, log: gitLog, "refresh() done — %d entries, total %.3f s",
+               newStatuses.count, totalElapsed)
 
         lock.lock()
         statuses = newStatuses
@@ -78,6 +103,7 @@ final class GitStatus {
         if let direct = snap[directPath] {
             return direct
         }
+        // Walk up to inherit untracked status from an ancestor directory.
         var path = directPath
         while !path.isEmpty && path != "/" {
             path = (path as NSString).deletingLastPathComponent
@@ -85,7 +111,16 @@ final class GitStatus {
                 return .untracked
             }
         }
-        return nil
+        // For directories, check if any descendant has a status. Modified takes
+        // priority over untracked so the directory reflects the "strongest" change.
+        let prefix = directPath.hasSuffix("/") ? directPath : directPath + "/"
+        var result: Kind?
+        for (storedPath, kind) in snap {
+            guard storedPath.hasPrefix(prefix) else { continue }
+            if kind == .modified { return .modified }
+            result = kind
+        }
+        return result
     }
 
     /// Run `git -C <root> <args...>` synchronously. Returns trimmed stdout, or
@@ -107,8 +142,11 @@ final class GitStatus {
         guard process.terminationStatus == 0 else { return nil }
 
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var str = String(data: data, encoding: .utf8) else { return nil }
+        // Only strip trailing whitespace — leading spaces are significant in
+        // porcelain output (e.g. " M" means unstaged-only modification).
+        while str.last?.isWhitespace == true { str.removeLast() }
+        return str
     }
 }
 
