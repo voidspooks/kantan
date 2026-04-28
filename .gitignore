@@ -1,1 +1,6 @@
-Kantan
+.DS_Store
+Kantan.app/
+build/
+icon.png
+AppIcon.icns
+AppIcon.iconset/

@@ -6,6 +6,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
     var window: NSWindow!
     var textView: NSTextView!
     var gutterView: GutterView!
+    var workspaceView: WorkspaceView!
     var currentURL: URL?
     var dirty = false
 
@@ -93,12 +94,18 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         gutterView = GutterView(textView: textView, scrollView: scrollView)
         gutterView.gutterFont = editorFont
         let container = GutterContainerView(gutter: gutterView, scrollView: scrollView)
-        container.frame = frame
-        container.autoresizingMask = [.width, .height]
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        workspaceView = WorkspaceView(gutterContainer: container)
+        workspaceView.frame = frame
+        workspaceView.autoresizingMask = [.width, .height]
+        workspaceView.sidebar.onSelect = { [weak self] url in
+            self?.loadFile(url: url)
+        }
 
         gutterView.refresh()
 
-        window.contentView = container
+        window.contentView = workspaceView
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(textView)
 
@@ -148,6 +155,25 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         if panel.runModal() == .OK, let url = panel.url {
             loadFile(url: url)
         }
+    }
+
+    @objc func openFolder(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        if panel.runModal() == .OK, let url = panel.url {
+            workspaceView.setRootFolder(url)
+        }
+    }
+
+    @objc func toggleSidebar(_ sender: Any?) {
+        workspaceView.toggleSidebar()
+    }
+
+    @objc func refreshSidebar(_ sender: Any?) {
+        workspaceView.refreshSidebar()
     }
 
     @objc func saveDocument(_ sender: Any?) {

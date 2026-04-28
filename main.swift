@@ -69,6 +69,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let openItem = NSMenuItem(title: "Open…", action: #selector(Editor.openDocument(_:)), keyEquivalent: "o")
         openItem.target = editor
         fileMenu.addItem(openItem)
+        let openFolderItem = NSMenuItem(title: "Open Folder…",
+                                        action: #selector(Editor.openFolder(_:)),
+                                        keyEquivalent: "o")
+        openFolderItem.target = editor
+        openFolderItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(openFolderItem)
         fileMenu.addItem(.separator())
         let saveItem = NSMenuItem(title: "Save", action: #selector(Editor.saveDocument(_:)), keyEquivalent: "s")
         saveItem.target = editor
@@ -98,8 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Paste",      action: #selector(NSText.paste(_:)),     keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenu.addItem(.separator())
-        let findItem = NSMenuItem(title: "Find…", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
-        findItem.tag = Int(NSTextFinder.Action.showFindInterface.rawValue)
+        let findItem = NSMenuItem(title: "Find & Replace…", action: #selector(NSTextView.performFindPanelAction(_:)), keyEquivalent: "f")
+        findItem.tag = Int(NSTextFinder.Action.showReplaceInterface.rawValue)
         editMenu.addItem(findItem)
         editMenu.addItem(.separator())
         let increaseItem = NSMenuItem(title: "Increase Text Size",
@@ -149,6 +155,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                       keyEquivalent: "")
         settingsItem.target = editor
         configMenu.addItem(settingsItem)
+
+        configMenu.addItem(.separator())
+        let toggleSidebarItem = NSMenuItem(title: "Toggle Sidebar",
+                                           action: #selector(Editor.toggleSidebar(_:)),
+                                           keyEquivalent: "b")
+        toggleSidebarItem.target = editor
+        configMenu.addItem(toggleSidebarItem)
+        let refreshSidebarItem = NSMenuItem(title: "Refresh Sidebar",
+                                            action: #selector(Editor.refreshSidebar(_:)),
+                                            keyEquivalent: "")
+        refreshSidebarItem.target = editor
+        configMenu.addItem(refreshSidebarItem)
+
         configItem.submenu = configMenu
         mainMenu.addItem(configItem)
 

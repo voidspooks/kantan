@@ -12,6 +12,10 @@ enum Theme {
     static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
     static let gutterBorder     = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
 
+    static let sidebarBackground = NSColor(red: 0.108, green: 0.108, blue: 0.118, alpha: 1.0)
+    static let sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
+    static let sidebarSelection  = NSColor(red: 0.16,  green: 0.31,  blue: 0.50,  alpha: 1.0)
+
     // Token defaults shared across languages.
     private static let dKeyword  = NSColor(red: 0.776, green: 0.522, blue: 0.753, alpha: 1.0)
     private static let dString   = NSColor(red: 0.808, green: 0.569, blue: 0.471, alpha: 1.0)
