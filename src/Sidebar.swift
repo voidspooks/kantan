@@ -363,7 +363,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     func refreshGitStatus() {
         gitStatus.refresh()
         updateBranchFooter()
-        outlineView.reloadData()
+        reloadVisibleRowColors()
     }
 
     /// Non-blocking variant used by the file system watcher. Runs `git status`
@@ -373,8 +373,19 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             self?.gitStatus.refresh()
             DispatchQueue.main.async { [weak self] in
                 self?.updateBranchFooter()
-                self?.outlineView.reloadData()
+                self?.reloadVisibleRowColors()
             }
+        }
+    }
+
+    /// Update text colors on visible rows without calling reloadData (which
+    /// destroys selection, first responder, and inline-rename state).
+    private func reloadVisibleRowColors() {
+        let visible = outlineView.rows(in: outlineView.visibleRect)
+        for row in visible.location..<(visible.location + visible.length) {
+            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCellView,
+                  let node = outlineView.item(atRow: row) as? FileNode else { continue }
+            cell.textField?.textColor = textColor(for: node)
         }
     }
 
@@ -856,10 +867,10 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     private var diffOverrides: [String: Bool] = [:]
 
     /// Mark a file as modified (has changes) or clean based on diff results.
-    /// Immediately reloads the outline so the filename color updates.
+    /// Immediately updates visible row colors so the filename color updates.
     func markFile(_ url: URL, hasChanges: Bool) {
         diffOverrides[url.path] = hasChanges
-        outlineView.reloadData()
+        reloadVisibleRowColors()
     }
 
     /// Foreground color for a row's filename. Defaults to `Theme.sidebarText`,
