@@ -44,6 +44,8 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             defer: false
         )
         window.appearance = NSAppearance(named: .darkAqua)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = Theme.background
         window.center()
         window.delegate = self
         window.isReleasedWhenClosed = false
@@ -107,6 +109,9 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         workspaceView.autoresizingMask = [.width, .height]
         workspaceView.sidebar.onSelect = { [weak self] url in
             self?.loadFile(url: url)
+        }
+        workspaceView.sidebar.onRename = { [weak self] oldURL, newURL in
+            self?.handleSidebarRename(from: oldURL, to: newURL)
         }
 
         gutterView.refresh()
@@ -296,6 +301,17 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         _ = saveAs()
     }
 
+    /// Called after the sidebar renames a file on disk. If the renamed file is
+    /// the one we have open, retarget the URL so subsequent saves write to the
+    /// new path, refresh the title, and re-detect syntax in case the extension
+    /// changed (e.g. .swift → .py).
+    private func handleSidebarRename(from oldURL: URL, to newURL: URL) {
+        guard currentURL == oldURL else { return }
+        currentURL = newURL
+        updateTitle()
+        selectSyntax(for: newURL)
+    }
+
     private func loadFile(url: URL) {
         do {
             let content = try String(contentsOf: url, encoding: .utf8)
@@ -332,6 +348,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         if panel.runModal() == .OK, let url = panel.url {
             currentURL = url
             saveTo(url: url)
+            workspaceView?.sidebar.refreshDirectory(containing: url)
             return true
         }
         return false
@@ -349,6 +366,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
                     activeSyntax?.highlight(storage)
                 }
                 applyLineNumbersVisibility()
+                applyWorkspaceTheme()
             }
         } catch {
             showError("Couldn't save file: \(error.localizedDescription)")
@@ -404,6 +422,13 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             SettingsStore.setLineNumbers(next)
         }
         applyLineNumbersVisibility()
+    }
+
+    private func applyWorkspaceTheme() {
+        window.backgroundColor = Theme.background
+        textView.backgroundColor = Theme.background
+        textView.enclosingScrollView?.backgroundColor = Theme.background
+        workspaceView?.sidebar.applyTheme()
     }
 
     private func applyLineNumbersVisibility() {

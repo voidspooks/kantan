@@ -3,7 +3,11 @@ import AppKit
 // MARK: - Theme (dark mode only)
 
 enum Theme {
-    static let background = NSColor(red: 0.118, green: 0.118, blue: 0.129, alpha: 1.0)
+    // Editor + sidebar backgrounds are var so they can be re-bound from settings.yaml
+    // (`theme:` block) without restarting the app.
+    static var background = NSColor.black
+    static var sidebarBackground = NSColor.black
+
     static let foreground = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
     static let cursor     = NSColor.white
     static let selection  = NSColor(red: 0.16,  green: 0.31,  blue: 0.50,  alpha: 1.0)
@@ -12,7 +16,6 @@ enum Theme {
     static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
     static let gutterBorder     = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
 
-    static let sidebarBackground = NSColor(red: 0.108, green: 0.108, blue: 0.118, alpha: 1.0)
     static let sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
     static let sidebarSelection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
 

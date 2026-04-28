@@ -69,36 +69,38 @@ enum Syntax: Int, CaseIterable {
         }
     }
 
-    /// Devicon path component (e.g. "python/python-original") used to fetch the SVG
-    /// from jsDelivr. nil for languages devicon doesn't carry. Variant choices follow
-    /// devicon's repo: most languages have `-original`, a few only ship `-plain`, and
-    /// Go's icon is the gopher logo (`-original-logo`).
+    /// Devicon path component (e.g. "python/python-plain") used to fetch the SVG
+    /// from jsDelivr. nil for languages devicon doesn't carry. We prefer `-plain`
+    /// (line-art / single-color) variants because the cell renders icons as templates
+    /// tinted with `Theme.sidebarText`, and the plain art masks more cleanly than the
+    /// fully-colored `-original` shapes. A few languages only ship `-original` (or a
+    /// gopher-style logo for Go) and stay on those.
     var iconPath: String? {
         switch self {
-        case .ruby:       return "ruby/ruby-original"
+        case .ruby:       return "ruby/ruby-plain"
         case .yaml:       return "yaml/yaml-original"
         case .swift:      return "swift/swift-original"
-        case .javascript: return "javascript/javascript-original"
-        case .html:       return "html5/html5-original"
-        case .python:     return "python/python-original"
-        case .typescript: return "typescript/typescript-original"
-        case .java:       return "java/java-original"
-        case .c:          return "c/c-original"
-        case .cpp:        return "cplusplus/cplusplus-original"
-        case .csharp:     return "csharp/csharp-original"
-        case .php:        return "php/php-original"
+        case .javascript: return "javascript/javascript-plain"
+        case .html:       return "html5/html5-plain"
+        case .python:     return "python/python-plain"
+        case .typescript: return "typescript/typescript-plain"
+        case .java:       return "java/java-plain"
+        case .c:          return "c/c-plain"
+        case .cpp:        return "cplusplus/cplusplus-plain"
+        case .csharp:     return "csharp/csharp-plain"
+        case .php:        return "php/php-plain"
         case .go:         return "go/go-original-logo"
-        case .rust:       return "rust/rust-original"
-        case .kotlin:     return "kotlin/kotlin-original"
+        case .rust:       return "rust/rust-plain"
+        case .kotlin:     return "kotlin/kotlin-plain"
         case .sql:        return nil
-        case .r:          return "r/r-original"
-        case .dart:       return "dart/dart-original"
-        case .scala:      return "scala/scala-original"
-        case .perl:       return "perl/perl-original"
+        case .r:          return "r/r-plain"
+        case .dart:       return "dart/dart-plain"
+        case .scala:      return "scala/scala-plain"
+        case .perl:       return "perl/perl-plain"
         case .lua:        return "lua/lua-plain"
-        case .bash:       return "bash/bash-original"
+        case .bash:       return "bash/bash-plain"
         case .markdown:   return "markdown/markdown-original"
-        case .css:        return "css3/css3-original"
+        case .css:        return "css3/css3-plain"
         case .makefile:   return nil
         }
     }

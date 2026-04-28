@@ -29,6 +29,33 @@ final class FileNode {
         _children = nil
     }
 
+    /// Children that have already been loaded. Does not trigger a load.
+    var cachedChildren: [FileNode] { _children ?? [] }
+
+    /// Re-read children from disk while preserving FileNode identity for URLs that
+    /// still exist. NSOutlineView keys expansion off of item identity, so reusing
+    /// instances keeps sub-trees expanded across a refresh.
+    func reloadChildren() {
+        guard isDirectory else { _children = []; return }
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            _children = []
+            return
+        }
+        let existingByURL = Dictionary(uniqueKeysWithValues: (_children ?? []).map { ($0.url, $0) })
+        let nodes = entries.map { url in existingByURL[url] ?? FileNode(url: url) }
+        _children = nodes.sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory {
+                return lhs.isDirectory
+            }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
     private func loadChildren() -> [FileNode] {
         guard isDirectory else { return [] }
         let fm = FileManager.default
@@ -66,16 +93,38 @@ final class SidebarRowView: NSTableRowView {
 // MARK: - Outline view (no system disclosure triangle)
 
 /// Hides the system-drawn disclosure triangle so we can render a chevron inside
-/// the cell's image slot — same x-position as a file's language icon.
+/// the cell's image slot — same x-position as a file's language icon. Also pulls
+/// the cell flush to its level-indent so depth-0 rows aren't pushed right by the
+/// space NSOutlineView would normally reserve for the disclosure.
 final class IconAlignedOutlineView: NSOutlineView {
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         return .zero
     }
+
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        let target = CGFloat(self.level(forRow: row)) * self.indentationPerLevel
+        if frame.origin.x > target {
+            let delta = frame.origin.x - target
+            frame.origin.x -= delta
+            frame.size.width += delta
+        }
+        return frame
+    }
+}
+
+// MARK: - File row cell
+
+/// Holds references to the icon's size constraints so the row can resize them
+/// when the editor font (and hence the row height) changes.
+final class FileCellView: NSTableCellView {
+    var iconWidthConstraint: NSLayoutConstraint!
+    var iconHeightConstraint: NSLayoutConstraint!
 }
 
 // MARK: - Sidebar (file tree)
 
-final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
+final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate, NSMenuDelegate {
     private let outlineView: NSOutlineView
     private let scrollView: NSScrollView
     private var rootNode: FileNode?
@@ -83,8 +132,23 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     private var cellFont: NSFont = NSFont(name: "Menlo", size: 13)
         ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    /// Icon size tracks the cell font so language SVGs and SF Symbols grow/shrink
+    /// alongside the editor's font-size shortcuts.
+    private var iconSize: CGFloat {
+        return ceil(cellFont.pointSize) + 1
+    }
+
     /// Fired when the user clicks a file row (not a directory).
     var onSelect: ((URL) -> Void)?
+
+    /// Fired after an inline rename succeeds. The editor uses this to retarget
+    /// `currentURL` if the renamed file is the one it has open.
+    var onRename: ((_ from: URL, _ to: URL) -> Void)?
+
+    // Inline-rename state. The text field is held weakly because cell views are
+    // recycled — if the row scrolls offscreen mid-rename the field can vanish.
+    private var renamingNode: FileNode?
+    private weak var renamingTextField: NSTextField?
 
     override init(frame: NSRect) {
         outlineView = IconAlignedOutlineView()
@@ -107,6 +171,9 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         outlineView.target = self
         outlineView.action = #selector(handleClick(_:))
         outlineView.doubleAction = #selector(handleDoubleClick(_:))
+        let menu = NSMenu()
+        menu.delegate = self
+        outlineView.menu = menu
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
@@ -127,6 +194,14 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    /// Re-bind background colors from `Theme` after settings.yaml changes.
+    func applyTheme() {
+        outlineView.backgroundColor = Theme.sidebarBackground
+        scrollView.backgroundColor = Theme.sidebarBackground
+        outlineView.needsDisplay = true
+        scrollView.needsDisplay = true
+    }
 
     func setRowFont(_ font: NSFont) {
         cellFont = font
@@ -153,6 +228,28 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         outlineView.reloadData()
     }
 
+    /// Refresh only the directory containing `url`, preserving expansion of
+    /// unrelated sub-trees. No-op if the directory isn't part of the loaded tree
+    /// (e.g., the file lives in a sub-folder that's never been expanded — it'll
+    /// appear naturally when the user expands it).
+    func refreshDirectory(containing url: URL) {
+        guard let root = rootNode else { return }
+        let parent = url.deletingLastPathComponent()
+        guard let target = findNode(matching: parent, in: root) else { return }
+        target.reloadChildren()
+        // NSOutlineView's data source uses `nil` for the root.
+        outlineView.reloadItem(target === root ? nil : target, reloadChildren: true)
+    }
+
+    private func findNode(matching url: URL, in node: FileNode) -> FileNode? {
+        if node.url.path == url.path { return node }
+        if !node.isDirectory { return nil }
+        for child in node.cachedChildren {
+            if let found = findNode(matching: url, in: child) { return found }
+        }
+        return nil
+    }
+
     @objc private func handleClick(_ sender: Any?) {
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
@@ -177,6 +274,191 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         } else {
             outlineView.expandItem(node)
         }
+    }
+
+    // MARK: Right-click menu
+
+    /// Dynamic menu — items are rebuilt on each open so we can hide Paste on files
+    /// (and on directories when the pasteboard has nothing to paste). NSMenuDelegate.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let node = clickedNode() else { return }
+
+        appendItem(menu, "Copy", #selector(copyClicked(_:)))
+        if node.isDirectory && pasteboardHasFileURLs() {
+            appendItem(menu, "Paste", #selector(pasteClicked(_:)))
+        }
+        menu.addItem(.separator())
+        appendItem(menu, "Rename", #selector(renameClicked(_:)))
+        menu.addItem(.separator())
+        appendItem(menu, "Delete", #selector(deleteClicked(_:)))
+    }
+
+    private func appendItem(_ menu: NSMenu, _ title: String, _ action: Selector) {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+    }
+
+    private func clickedNode() -> FileNode? {
+        let row = outlineView.clickedRow
+        guard row >= 0 else { return nil }
+        return outlineView.item(atRow: row) as? FileNode
+    }
+
+    /// Reload only the renamed/deleted item's parent subtree so other expanded
+    /// directories keep their state.
+    private func reloadParent(of node: FileNode) {
+        if let parent = outlineView.parent(forItem: node) as? FileNode {
+            parent.reloadChildren()
+            outlineView.reloadItem(parent, reloadChildren: true)
+        } else {
+            rootNode?.reloadChildren()
+            outlineView.reloadData()
+        }
+    }
+
+    @objc private func copyClicked(_ sender: Any?) {
+        guard let node = clickedNode() else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([node.url as NSURL])
+    }
+
+    @objc private func pasteClicked(_ sender: Any?) {
+        guard let target = clickedNode(), target.isDirectory else { return }
+        let sources = pasteboardFileURLs()
+        guard !sources.isEmpty else { return }
+
+        let fm = FileManager.default
+        for src in sources {
+            let dst = uniqueDestination(in: target.url, fromName: src.lastPathComponent)
+            do {
+                try fm.copyItem(at: src, to: dst)
+            } catch {
+                NSAlert(error: error).runModal()
+                break
+            }
+        }
+
+        // Refresh the target subtree and reveal its contents so the new file is visible.
+        target.reloadChildren()
+        outlineView.reloadItem(target, reloadChildren: true)
+        outlineView.expandItem(target)
+    }
+
+    private func pasteboardHasFileURLs() -> Bool {
+        return !pasteboardFileURLs().isEmpty
+    }
+
+    private func pasteboardFileURLs() -> [URL] {
+        let pb = NSPasteboard.general
+        let urls = pb.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] ?? []
+        return urls.filter { $0.isFileURL }
+    }
+
+    /// Pick a non-colliding destination URL inside `folder` for a given source name.
+    /// On collision, suffix the basename with " 2", " 3", … (Finder convention).
+    private func uniqueDestination(in folder: URL, fromName name: String) -> URL {
+        let candidate = folder.appendingPathComponent(name)
+        if !FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+        let ext = (name as NSString).pathExtension
+        let base = (name as NSString).deletingPathExtension
+        var n = 2
+        while true {
+            let nextName = ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"
+            let next = folder.appendingPathComponent(nextName)
+            if !FileManager.default.fileExists(atPath: next.path) {
+                return next
+            }
+            n += 1
+        }
+    }
+
+    @objc private func renameClicked(_ sender: Any?) {
+        let row = outlineView.clickedRow
+        guard row >= 0,
+              let node = outlineView.item(atRow: row) as? FileNode,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCellView,
+              let textField = cell.textField else { return }
+
+        renamingNode = node
+        renamingTextField = textField
+        textField.isEditable = true
+        textField.isSelectable = true
+        textField.delegate = self
+        window?.makeFirstResponder(textField)
+
+        // Pre-select the basename so typing replaces just the name; users keep the
+        // extension by default but can shift-arrow to extend if they want it gone.
+        if let editor = textField.currentEditor() {
+            let name = textField.stringValue
+            if !node.isDirectory, let dot = name.lastIndex(of: "."), dot != name.startIndex {
+                let baseLength = name.distance(from: name.startIndex, to: dot)
+                editor.selectedRange = NSRange(location: 0, length: baseLength)
+            } else {
+                editor.selectAll(nil)
+            }
+        }
+    }
+
+    @objc private func deleteClicked(_ sender: Any?) {
+        guard let node = clickedNode() else { return }
+        let alert = NSAlert()
+        alert.messageText = "Move \u{201C}\(node.displayName)\u{201D} to Trash?"
+        alert.informativeText = "You can restore it from the Trash."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        NSWorkspace.shared.recycle([node.url]) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let error = error {
+                    NSAlert(error: error).runModal()
+                    return
+                }
+                self.reloadParent(of: node)
+            }
+        }
+    }
+
+    // MARK: NSTextFieldDelegate (inline rename commit)
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let textField = obj.object as? NSTextField,
+              textField === renamingTextField,
+              let node = renamingNode else { return }
+
+        let newName = textField.stringValue
+        let oldName = node.displayName
+
+        // Restore the field to its label-style appearance regardless of outcome.
+        textField.isEditable = false
+        textField.isSelectable = false
+        textField.delegate = nil
+        renamingNode = nil
+        renamingTextField = nil
+
+        if newName.isEmpty || newName == oldName {
+            textField.stringValue = oldName
+            return
+        }
+
+        let oldURL = node.url
+        let newURL = oldURL.deletingLastPathComponent().appendingPathComponent(newName)
+        do {
+            try FileManager.default.moveItem(at: oldURL, to: newURL)
+        } catch {
+            NSAlert(error: error).runModal()
+            textField.stringValue = oldName
+            return
+        }
+        onRename?(oldURL, newURL)
+        reloadParent(of: node)
     }
 
     // MARK: NSOutlineViewDataSource
@@ -211,15 +493,15 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("FileCell")
-        let cell: NSTableCellView
-        if let recycled = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
+        let cell: FileCellView
+        if let recycled = outlineView.makeView(withIdentifier: identifier, owner: self) as? FileCellView {
             cell = recycled
         } else {
-            cell = NSTableCellView()
+            cell = FileCellView()
             cell.identifier = identifier
             let imageView = NSImageView()
             imageView.translatesAutoresizingMaskIntoConstraints = false
-            imageView.imageScaling = .scaleProportionallyDown
+            imageView.imageScaling = .scaleProportionallyUpOrDown
             cell.addSubview(imageView)
             cell.imageView = imageView
             let textField = NSTextField(labelWithString: "")
@@ -232,18 +514,22 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             textField.textColor = Theme.sidebarText
             cell.addSubview(textField)
             cell.textField = textField
+            cell.iconWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: iconSize)
+            cell.iconHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: iconSize)
             NSLayoutConstraint.activate([
-                imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
                 imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                imageView.widthAnchor.constraint(equalToConstant: 14),
-                imageView.heightAnchor.constraint(equalToConstant: 14),
-                textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 4),
+                cell.iconWidthConstraint,
+                cell.iconHeightConstraint,
+                textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 7),
                 textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         }
         cell.textField?.stringValue = node.displayName
         cell.textField?.font = cellFont
+        cell.iconWidthConstraint.constant = iconSize
+        cell.iconHeightConstraint.constant = iconSize
 
         // Reset before deciding — cells get reused, so a previous icon could otherwise
         // bleed onto a folder or unrecognized file.
@@ -251,7 +537,9 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         cell.imageView?.contentTintColor = nil
         if node.isDirectory {
             let symbol = outlineView.isItemExpanded(node) ? "chevron.down" : "chevron.right"
-            cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            // Chevrons render visually heavier than the language SVGs at the same point
+            // size, so we draw them a few points smaller to match the visual weight.
+            cell.imageView?.image = symbolImage(named: symbol, pointSize: iconSize - 3)
             cell.imageView?.contentTintColor = Theme.sidebarText
         } else {
             var languageImage: NSImage? = nil
@@ -263,14 +551,26 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             }
             if let languageImage = languageImage {
                 cell.imageView?.image = languageImage
+                cell.imageView?.contentTintColor = Theme.sidebarText
             } else {
                 // Fallback: generic text-document glyph for unknown extensions and as a
                 // placeholder while a language icon is still being fetched from the CDN.
-                cell.imageView?.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+                cell.imageView?.image = symbolImage(named: "doc.text")
                 cell.imageView?.contentTintColor = Theme.sidebarText
             }
         }
         return cell
+    }
+
+    /// Build an SF Symbol image sized to track the cell font. Without an explicit
+    /// SymbolConfiguration the symbol renders at its natural ~13pt regardless of
+    /// the imageView frame, so it would stay tiny when the editor font grows.
+    /// `pointSize` overrides the default (`iconSize`) — used by chevrons, which
+    /// look too heavy when sized identically to the language SVGs.
+    private func symbolImage(named name: String, pointSize: CGFloat? = nil) -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize ?? iconSize, weight: .regular)
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {

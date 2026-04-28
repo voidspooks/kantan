@@ -33,6 +33,7 @@ final class IconCache {
         let diskURL = Self.cacheDirectory.appendingPathComponent(diskFilename(for: path))
         if FileManager.default.fileExists(atPath: diskURL.path),
            let image = NSImage(contentsOf: diskURL) {
+            image.isTemplate = true
             memory[path] = image
             return image
         }
@@ -55,6 +56,7 @@ final class IconCache {
                     self.failed.insert(path)
                     return
                 }
+                image.isTemplate = true
                 try? data.write(to: diskURL)
                 self.memory[path] = image
                 callbacks.forEach { $0() }

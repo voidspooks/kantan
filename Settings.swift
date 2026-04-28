@@ -5,6 +5,10 @@ import AppKit
 let defaultSettingsYAML = """
 line_numbers: true
 
+theme:
+  editor_background:  "#000000"
+  sidebar_background: "#000000"
+
 indent:
   ruby:
     style: space
@@ -372,6 +376,47 @@ enum SettingsStore {
             merged[lang] = cfg
         }
         indentByLanguage = merged
+
+        let themeColors = parseTheme(text)
+        if let c = themeColors["editor_background"]  { Theme.background = c }
+        if let c = themeColors["sidebar_background"] { Theme.sidebarBackground = c }
+    }
+
+    /// Parse the `theme:` block. Recognized keys (so far): `editor_background`,
+    /// `sidebar_background`. Values are `"#RRGGBB"` strings. Anything else is ignored.
+    static func parseTheme(_ text: String) -> [String: NSColor] {
+        var result: [String: NSColor] = [:]
+        var inTheme = false
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#"), hash != line.startIndex {
+                let beforeHash = line[..<hash]
+                if !beforeHash.contains("\"") {
+                    line = String(beforeHash)
+                }
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+
+            if indent == 0 {
+                inTheme = trimmed.hasPrefix("theme:")
+                continue
+            }
+            if !inTheme { continue }
+            if indent >= 2 {
+                guard let colon = trimmed.firstIndex(of: ":") else { continue }
+                let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces)
+                var value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+                    value = String(value.dropFirst().dropLast())
+                }
+                if let color = parseHex(String(value)) {
+                    result[String(key)] = color
+                }
+            }
+        }
+        return result
     }
 
     /// Parse the `indent:` block. Each language has a `style: tab|space` and `width: <int>`.
