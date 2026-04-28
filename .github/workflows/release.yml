@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make
+
+      - name: Package
+        run: |
+          ditto -c -k --keepParent Kantan.app Kantan.app.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Kantan.app.zip
+          generate_release_notes: true
