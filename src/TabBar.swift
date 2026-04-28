@@ -20,6 +20,8 @@ final class TabBarView: NSView {
     private let stack = NSStackView()
     private let scroll = NSScrollView()
     private let documentView = NSView()
+    private(set) var tabFont: NSFont = NSFont(name: "Menlo", size: 13)
+        ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -78,10 +80,17 @@ final class TabBarView: NSView {
         path.stroke()
     }
 
+    func setFont(_ font: NSFont) {
+        tabFont = font
+        for case let tab as TabItemView in stack.arrangedSubviews {
+            tab.updateFont(font)
+        }
+    }
+
     func update(items: [TabBarItem], activeIndex: Int) {
         for v in stack.arrangedSubviews { stack.removeView(v) }
         for (i, item) in items.enumerated() {
-            let view = TabItemView(item: item, isActive: i == activeIndex)
+            let view = TabItemView(item: item, isActive: i == activeIndex, font: tabFont)
             view.onClick = { [weak self] in self?.onSelect?(i) }
             view.onClose = { [weak self] in self?.onClose?(i) }
             stack.addArrangedSubview(view)
@@ -104,7 +113,7 @@ final class TabItemView: NSView {
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
-    init(item: TabBarItem, isActive: Bool) {
+    init(item: TabBarItem, isActive: Bool, font: NSFont) {
         self.item = item
         self.isActive = isActive
         super.init(frame: .zero)
@@ -112,7 +121,7 @@ final class TabItemView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         label.stringValue = item.title
-        label.font = NSFont.systemFont(ofSize: 12)
+        label.font = font
         label.textColor = isActive ? Theme.foreground : Theme.gutterText
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -160,17 +169,28 @@ final class TabItemView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
+    func updateFont(_ font: NSFont) {
+        label.font = font
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         Theme.background.setFill()
         bounds.fill()
+
+        Theme.gutterBorder.setFill()
+        // Bottom border
+        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
+        // Left border
+        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        // Right border
+        NSRect(x: bounds.maxX - 1, y: 0, width: 1, height: bounds.height).fill()
+
         if isActive {
-            // 2px foreground accent — punches through the gray top border with a
-            // brighter color so the active tab is unambiguous.
+            // Thicker white top border for the active tab
             Theme.foreground.setFill()
             NSRect(x: 0, y: bounds.maxY - 2, width: bounds.width, height: 2).fill()
         } else {
-            // 1px top edge that matches the strip's gray line so the separator
-            // reads continuously across the bar.
+            // 1px gray top border for inactive tabs
             Theme.gutterBorder.setFill()
             NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
         }

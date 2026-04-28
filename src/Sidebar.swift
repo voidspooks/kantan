@@ -227,6 +227,15 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     private var branchIconWidth: NSLayoutConstraint!
     private var branchIconHeight: NSLayoutConstraint!
 
+    // Header: black bar with folder/repo name at the top of the sidebar.
+    private let headerContainer = NSView()
+    private let headerDivider = NSView()
+    private let headerIcon = NSImageView()
+    private let headerLabel = NSTextField(labelWithString: "")
+    private var headerHeight: NSLayoutConstraint!
+    private var headerIconWidth: NSLayoutConstraint!
+    private var headerIconHeight: NSLayoutConstraint!
+
     /// Fired when the user clicks a file row (not a directory).
     var onSelect: ((URL) -> Void)?
 
@@ -279,14 +288,37 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
         setupBranchFooter()
+        setupHeader()
         dividerHeight = dividerView.heightAnchor.constraint(equalToConstant: 0)
         branchContainerHeight = branchContainer.heightAnchor.constraint(equalToConstant: 0)
         branchIconWidth = branchIcon.widthAnchor.constraint(equalToConstant: iconSize)
         branchIconHeight = branchIcon.heightAnchor.constraint(equalToConstant: iconSize)
+        headerHeight = headerContainer.heightAnchor.constraint(equalToConstant: 0)
+        headerIconWidth = headerIcon.widthAnchor.constraint(equalToConstant: iconSize)
+        headerIconHeight = headerIcon.heightAnchor.constraint(equalToConstant: iconSize)
         NSLayoutConstraint.activate([
             // Leave a 1px gap at the top so SidebarView.draw can paint the
             // window-spanning gray border that meets the tab bar's top line.
-            scrollView.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            headerContainer.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            headerContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headerContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            headerHeight,
+
+            headerIcon.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor, constant: 12),
+            headerIcon.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor),
+            headerIconWidth,
+            headerIconHeight,
+
+            headerLabel.leadingAnchor.constraint(equalTo: headerIcon.trailingAnchor, constant: 7),
+            headerLabel.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor, constant: -8),
+            headerLabel.centerYAnchor.constraint(equalTo: headerContainer.centerYAnchor, constant: 1),
+
+            headerDivider.leadingAnchor.constraint(equalTo: headerContainer.leadingAnchor),
+            headerDivider.trailingAnchor.constraint(equalTo: headerContainer.trailingAnchor),
+            headerDivider.bottomAnchor.constraint(equalTo: headerContainer.bottomAnchor),
+            headerDivider.heightAnchor.constraint(equalToConstant: 1),
+
+            scrollView.topAnchor.constraint(equalTo: headerContainer.bottomAnchor),
             scrollView.bottomAnchor.constraint(equalTo: dividerView.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -330,6 +362,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     func setRowFont(_ font: NSFont) {
         cellFont = font
         applyRowHeight()
+        updateHeader()
         updateBranchFooter()
         outlineView.reloadData()
     }
@@ -355,6 +388,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             rootNode = nil
         }
         gitStatus.setRoot(url)
+        updateHeader()
         updateBranchFooter()
         outlineView.reloadData()
     }
@@ -409,6 +443,44 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         os_log(.info, log: sidebarLog, "reloadVisibleRowColors() — %d rows colored", colored)
     }
 
+    /// One-time wiring of the header bar that shows the folder name.
+    private func setupHeader() {
+        headerContainer.translatesAutoresizingMaskIntoConstraints = false
+        headerContainer.wantsLayer = true
+        headerContainer.layer?.backgroundColor = NSColor.black.cgColor
+        addSubview(headerContainer)
+
+        headerDivider.translatesAutoresizingMaskIntoConstraints = false
+        headerDivider.wantsLayer = true
+        headerDivider.layer?.backgroundColor = Theme.gutterBorder.cgColor
+        headerContainer.addSubview(headerDivider)
+
+        headerIcon.translatesAutoresizingMaskIntoConstraints = false
+        headerIcon.contentTintColor = Theme.gutterBorder
+        headerContainer.addSubview(headerIcon)
+
+        headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        headerLabel.drawsBackground = false
+        headerLabel.isBordered = false
+        headerLabel.isEditable = false
+        headerLabel.lineBreakMode = .byTruncatingTail
+        headerLabel.font = cellFont
+        headerLabel.textColor = Theme.gutterBorder
+        headerContainer.addSubview(headerLabel)
+    }
+
+    /// Show/hide the header and update its text when the root changes.
+    private func updateHeader() {
+        let name = rootNode?.url.lastPathComponent
+        let visible = name != nil
+        headerLabel.stringValue = name ?? ""
+        headerLabel.font = cellFont
+        headerIcon.image = symbolImage(named: "chevron.down", pointSize: iconSize * 0.85)
+        headerIconWidth.constant = iconSize
+        headerIconHeight.constant = iconSize
+        headerHeight.constant = visible ? 32 : 0
+    }
+
     /// One-time wiring of the divider + branch row subviews. Layout constraints
     /// are added separately in init alongside the scroll view's; visibility is
     /// driven by `updateBranchFooter`.
@@ -447,18 +519,12 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         // list reclaim the footer's space when the project isn't a git repo.
         dividerHeight.constant = visible ? 1 : 0
         branchContainerHeight.constant = visible ? max(iconSize + 10, 24) : 0
-        branchIconWidth.constant = iconSize
-        branchIconHeight.constant = iconSize
+        branchIconWidth.constant = 0
+        branchIconHeight.constant = 0
 
-        // Prefer devicon's git logo so the footer matches the language icons in
-        // the rows above. Fall back to the SF Symbol while the SVG is fetching
-        // (or permanently if the fetch fails).
-        let devicon = IconCache.shared.image(forPath: "git/git-plain") { [weak self] in
-            self?.updateBranchFooter()
-        }
-        branchIcon.image = devicon ?? symbolImage(named: "arrow.triangle.branch")
+        branchIcon.image = nil
         branchLabel.font = cellFont
-        branchLabel.stringValue = branch ?? ""
+        branchLabel.stringValue = branch != nil ? "⎇ \(branch!)" : ""
     }
 
     /// Refresh only the directory containing `url`, preserving expansion of
@@ -483,11 +549,17 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         return nil
     }
 
+    private static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif", "ico", "svg"
+    ]
+
     @objc private func handleClick(_ sender: Any?) {
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
         if node.isDirectory {
             toggle(node)
+        } else if Self.imageExtensions.contains(node.url.pathExtension.lowercased()) {
+            NSWorkspace.shared.open(node.url)
         } else {
             onSelect?(node.url)
         }

@@ -170,6 +170,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
 
         gutterView.refresh()
         workspaceView.sidebar.setRowFont(editorFont)
+        workspaceView.tabBar.setFont(editorFont)
         applyLineNumbersVisibility()
 
         window.contentView = workspaceView
@@ -577,6 +578,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         gutterView?.gutterFont = editorFont
         gutterView?.refresh()
         workspaceView?.sidebar.setRowFont(editorFont)
+        workspaceView?.tabBar.setFont(editorFont)
     }
 
     // MARK: Syntax highlighting toggle
