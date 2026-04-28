@@ -69,6 +69,17 @@ enum Syntax: Int, CaseIterable {
         }
     }
 
+    /// SF Symbol name for the language. Takes priority over `iconPath` because SF
+    /// Symbols are clean single-path glyphs that mask perfectly, whereas some devicon
+    /// SVGs (Swift in particular) ship a colored badge whose two paths collapse to a
+    /// solid rectangle under template tinting.
+    var sfSymbolName: String? {
+        switch self {
+        case .swift: return "swift"
+        default:     return nil
+        }
+    }
+
     /// Devicon path component (e.g. "python/python-plain") used to fetch the SVG
     /// from jsDelivr. nil for languages devicon doesn't carry. We prefer `-plain`
     /// (line-art / single-color) variants because the cell renders icons as templates

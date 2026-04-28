@@ -12,12 +12,20 @@ Editors are born light and grow heavy. Features arrive, settings multiply, and w
 
 The rule is plain: if a feature does not earn its place, it does not belong.
 
+What does this do? It makes Kantan *lightning fast*
+
+## AI
+
+There is no AI integration for Kantan, and no plans for one in the future.
+
+Nothing against AI, but this editor is meant to be "just an editor" and doesn't try to be much else. Nor should it.
+
 ## What it is
 
 - A native macOS editor, written in Swift.
 - Dark theme. Monospaced. Line numbers.
 - Open, edit, save. Find. Undo.
-- Ruby syntax highlighting.
+- Syntax highlighting.
 
 ## What it is not
 

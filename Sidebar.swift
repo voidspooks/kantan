@@ -135,8 +135,23 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// Icon size tracks the cell font so language SVGs and SF Symbols grow/shrink
     /// alongside the editor's font-size shortcuts.
     private var iconSize: CGFloat {
-        return ceil(cellFont.pointSize) + 1
+        return ceil(cellFont.pointSize)
     }
+
+    /// Snapshot of `git status --porcelain` for the open project. Refreshed
+    /// when the root changes and after any sidebar operation that touches files.
+    private let gitStatus = GitStatus()
+
+    // Footer: gray divider + branch icon + branch name. Hidden (height 0)
+    // when the project root isn't a git repo.
+    private let dividerView = NSView()
+    private let branchContainer = NSView()
+    private let branchIcon = NSImageView()
+    private let branchLabel = NSTextField(labelWithString: "")
+    private var dividerHeight: NSLayoutConstraint!
+    private var branchContainerHeight: NSLayoutConstraint!
+    private var branchIconWidth: NSLayoutConstraint!
+    private var branchIconHeight: NSLayoutConstraint!
 
     /// Fired when the user clicks a file row (not a directory).
     var onSelect: ((URL) -> Void)?
@@ -185,12 +200,43 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         scrollView.verticalScroller = MinimalScroller()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
+        setupBranchFooter()
+        dividerHeight = dividerView.heightAnchor.constraint(equalToConstant: 0)
+        branchContainerHeight = branchContainer.heightAnchor.constraint(equalToConstant: 0)
+        branchIconWidth = branchIcon.widthAnchor.constraint(equalToConstant: iconSize)
+        branchIconHeight = branchIcon.heightAnchor.constraint(equalToConstant: iconSize)
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // Leave a 1px gap at the top so SidebarView.draw can paint the
+            // window-spanning gray border that meets the tab bar's top line.
+            scrollView.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            scrollView.bottomAnchor.constraint(equalTo: dividerView.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            dividerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            dividerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dividerView.bottomAnchor.constraint(equalTo: branchContainer.topAnchor),
+            dividerHeight,
+
+            branchContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            branchContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            branchContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            branchContainerHeight,
+
+            branchIcon.leadingAnchor.constraint(equalTo: branchContainer.leadingAnchor, constant: 12),
+            branchIcon.centerYAnchor.constraint(equalTo: branchContainer.centerYAnchor),
+            branchIconWidth,
+            branchIconHeight,
+
+            branchLabel.leadingAnchor.constraint(equalTo: branchIcon.trailingAnchor, constant: 7),
+            branchLabel.trailingAnchor.constraint(equalTo: branchContainer.trailingAnchor, constant: -8),
+            branchLabel.centerYAnchor.constraint(equalTo: branchContainer.centerYAnchor),
         ])
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.gutterBorder.setFill()
+        NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
@@ -206,6 +252,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     func setRowFont(_ font: NSFont) {
         cellFont = font
         applyRowHeight()
+        updateBranchFooter()
         outlineView.reloadData()
     }
 
@@ -219,13 +266,77 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         } else {
             rootNode = nil
         }
+        gitStatus.setRoot(url)
+        updateBranchFooter()
         outlineView.reloadData()
     }
 
     /// Drop cached children and reload. Expansion state is lost — acceptable for v1.
     func refresh() {
         rootNode?.invalidate()
+        gitStatus.refresh()
+        updateBranchFooter()
         outlineView.reloadData()
+    }
+
+    /// Re-read git status without touching the file tree. Called by the editor
+    /// after a save so a freshly-modified file gets its yellow color immediately.
+    func refreshGitStatus() {
+        gitStatus.refresh()
+        updateBranchFooter()
+        outlineView.reloadData()
+    }
+
+    /// One-time wiring of the divider + branch row subviews. Layout constraints
+    /// are added separately in init alongside the scroll view's; visibility is
+    /// driven by `updateBranchFooter`.
+    private func setupBranchFooter() {
+        dividerView.translatesAutoresizingMaskIntoConstraints = false
+        dividerView.wantsLayer = true
+        dividerView.layer?.backgroundColor = Theme.gutterBorder.cgColor
+        addSubview(dividerView)
+
+        branchContainer.translatesAutoresizingMaskIntoConstraints = false
+        branchContainer.wantsLayer = true
+        branchContainer.layer?.backgroundColor = Theme.sidebarBackground.cgColor
+        addSubview(branchContainer)
+
+        branchIcon.translatesAutoresizingMaskIntoConstraints = false
+        branchIcon.imageScaling = .scaleProportionallyUpOrDown
+        branchIcon.contentTintColor = Theme.sidebarText
+        branchContainer.addSubview(branchIcon)
+
+        branchLabel.translatesAutoresizingMaskIntoConstraints = false
+        branchLabel.drawsBackground = false
+        branchLabel.isBordered = false
+        branchLabel.isEditable = false
+        branchLabel.lineBreakMode = .byTruncatingTail
+        branchLabel.textColor = Theme.sidebarText
+        branchContainer.addSubview(branchLabel)
+    }
+
+    /// Show/hide the divider + branch row, refresh the icon (so it tracks font
+    /// size changes) and label. Called after any git refresh and any font change.
+    private func updateBranchFooter() {
+        let branch = gitStatus.currentBranch
+        let visible = branch != nil
+
+        // Collapsing the heights to 0 (rather than just hiding) lets the file
+        // list reclaim the footer's space when the project isn't a git repo.
+        dividerHeight.constant = visible ? 1 : 0
+        branchContainerHeight.constant = visible ? max(iconSize + 10, 24) : 0
+        branchIconWidth.constant = iconSize
+        branchIconHeight.constant = iconSize
+
+        // Prefer devicon's git logo so the footer matches the language icons in
+        // the rows above. Fall back to the SF Symbol while the SVG is fetching
+        // (or permanently if the fetch fails).
+        let devicon = IconCache.shared.image(forPath: "git/git-plain") { [weak self] in
+            self?.updateBranchFooter()
+        }
+        branchIcon.image = devicon ?? symbolImage(named: "arrow.triangle.branch")
+        branchLabel.font = cellFont
+        branchLabel.stringValue = branch ?? ""
     }
 
     /// Refresh only the directory containing `url`, preserving expansion of
@@ -282,16 +393,25 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// (and on directories when the pasteboard has nothing to paste). NSMenuDelegate.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        guard let node = clickedNode() else { return }
 
-        appendItem(menu, "Copy", #selector(copyClicked(_:)))
-        if node.isDirectory && pasteboardHasFileURLs() {
-            appendItem(menu, "Paste", #selector(pasteClicked(_:)))
+        if let node = clickedNode() {
+            appendItem(menu, "Copy", #selector(copyClicked(_:)))
+            if node.isDirectory && pasteboardHasFileURLs() {
+                appendItem(menu, "Paste", #selector(pasteClicked(_:)))
+            }
+            menu.addItem(.separator())
+            appendItem(menu, "Rename", #selector(renameClicked(_:)))
+            if node.isDirectory {
+                appendItem(menu, "New File", #selector(newFileClicked(_:)))
+                appendItem(menu, "New Folder", #selector(newFolderClicked(_:)))
+            }
+            menu.addItem(.separator())
+            appendItem(menu, "Delete", #selector(deleteClicked(_:)))
+        } else if rootNode != nil {
+            // Empty-space click: create-in-root actions only.
+            appendItem(menu, "New File", #selector(newFileClicked(_:)))
+            appendItem(menu, "New Folder", #selector(newFolderClicked(_:)))
         }
-        menu.addItem(.separator())
-        appendItem(menu, "Rename", #selector(renameClicked(_:)))
-        menu.addItem(.separator())
-        appendItem(menu, "Delete", #selector(deleteClicked(_:)))
     }
 
     private func appendItem(_ menu: NSMenu, _ title: String, _ action: Selector) {
@@ -309,6 +429,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// Reload only the renamed/deleted item's parent subtree so other expanded
     /// directories keep their state.
     private func reloadParent(of node: FileNode) {
+        gitStatus.refresh()
         if let parent = outlineView.parent(forItem: node) as? FileNode {
             parent.reloadChildren()
             outlineView.reloadItem(parent, reloadChildren: true)
@@ -342,6 +463,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         }
 
         // Refresh the target subtree and reveal its contents so the new file is visible.
+        gitStatus.refresh()
         target.reloadChildren()
         outlineView.reloadItem(target, reloadChildren: true)
         outlineView.expandItem(target)
@@ -378,10 +500,18 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     }
 
     @objc private func renameClicked(_ sender: Any?) {
-        let row = outlineView.clickedRow
-        guard row >= 0,
-              let node = outlineView.item(atRow: row) as? FileNode,
-              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCellView,
+        guard let node = clickedNode() else { return }
+        beginRename(of: node)
+    }
+
+    /// Switch the row's text field into edit mode and focus it. Shared by the
+    /// Rename menu action and the New File / New Folder flow (which drop straight
+    /// into rename so the user can replace "untitled" without an extra step).
+    private func beginRename(of node: FileNode) {
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+        outlineView.scrollRowToVisible(row)
+        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? FileCellView,
               let textField = cell.textField else { return }
 
         renamingNode = node
@@ -402,6 +532,57 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
                 editor.selectAll(nil)
             }
         }
+    }
+
+    @objc private func newFileClicked(_ sender: Any?) {
+        createItem(isDirectory: false, defaultName: "untitled")
+    }
+
+    @objc private func newFolderClicked(_ sender: Any?) {
+        createItem(isDirectory: true, defaultName: "untitled folder")
+    }
+
+    /// Resolve the target folder, write the new item to disk, refresh that
+    /// subtree, and drop the freshly-created node into rename mode so the user
+    /// can name it without an extra click.
+    private func createItem(isDirectory: Bool, defaultName: String) {
+        guard let target = newItemTargetFolder() else { return }
+        let url = uniqueDestination(in: target.url, fromName: defaultName)
+        do {
+            if isDirectory {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            } else {
+                try Data().write(to: url, options: .withoutOverwriting)
+            }
+        } catch {
+            NSAlert(error: error).runModal()
+            return
+        }
+
+        gitStatus.refresh()
+        target.reloadChildren()
+        if target === rootNode {
+            outlineView.reloadData()
+        } else {
+            outlineView.reloadItem(target, reloadChildren: true)
+            outlineView.expandItem(target)
+        }
+
+        if let newNode = target.cachedChildren.first(where: { $0.url == url }) {
+            beginRename(of: newNode)
+        }
+    }
+
+    /// The folder that should receive a new file/folder for the current right-click.
+    /// Directory rows create inside themselves; empty-space clicks create in root.
+    private func newItemTargetFolder() -> FileNode? {
+        if let node = clickedNode(), node.isDirectory {
+            return node
+        }
+        if outlineView.clickedRow == -1 {
+            return rootNode
+        }
+        return nil
     }
 
     @objc private func deleteClicked(_ sender: Any?) {
@@ -528,6 +709,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         }
         cell.textField?.stringValue = node.displayName
         cell.textField?.font = cellFont
+        cell.textField?.textColor = textColor(for: node)
         cell.iconWidthConstraint.constant = iconSize
         cell.iconHeightConstraint.constant = iconSize
 
@@ -539,11 +721,16 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             let symbol = outlineView.isItemExpanded(node) ? "chevron.down" : "chevron.right"
             // Chevrons render visually heavier than the language SVGs at the same point
             // size, so we draw them a few points smaller to match the visual weight.
-            cell.imageView?.image = symbolImage(named: symbol, pointSize: iconSize - 3)
+            cell.imageView?.image = symbolImage(named: symbol, pointSize: iconSize - 5)
             cell.imageView?.contentTintColor = Theme.sidebarText
         } else {
             var languageImage: NSImage? = nil
-            if let iconPath = Syntax.from(url: node.url)?.iconPath {
+            let syntax = Syntax.from(url: node.url)
+            if let sf = syntax?.sfSymbolName {
+                // SF Symbol takes priority — used for languages (e.g. Swift) whose
+                // devicon SVG masks badly because it ships as a colored badge.
+                languageImage = symbolImage(named: sf)
+            } else if let iconPath = syntax?.iconPath {
                 languageImage = IconCache.shared.image(forPath: iconPath) { [weak outlineView, weak node] in
                     guard let outlineView = outlineView, let node = node else { return }
                     outlineView.reloadItem(node)
@@ -573,6 +760,17 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             .withSymbolConfiguration(config)
     }
 
+    /// Foreground color for a row's filename. Defaults to `Theme.sidebarText`,
+    /// switching to muted green for untracked files and muted yellow for files
+    /// git considers modified.
+    private func textColor(for node: FileNode) -> NSColor {
+        switch gitStatus.status(for: node.url) {
+        case .untracked: return Theme.gitUntracked
+        case .modified:  return Theme.gitModified
+        case nil:        return Theme.sidebarText
+        }
+    }
+
     func outlineViewItemDidExpand(_ notification: Notification) {
         if let node = notification.userInfo?["NSObject"] as? FileNode {
             outlineView.reloadItem(node)
@@ -590,7 +788,9 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
 
 final class WorkspaceView: NSSplitView, NSSplitViewDelegate {
     let sidebar: SidebarView
-    let gutterContainer: GutterContainerView
+    let editorPane: EditorPaneView
+    var gutterContainer: GutterContainerView { editorPane.gutterContainer }
+    var tabBar: TabBarView { editorPane.tabBar }
     private(set) var currentFolder: URL?
     private var savedSidebarWidth: CGFloat = 220
     private let defaultSidebarWidth: CGFloat = 220
@@ -599,15 +799,15 @@ final class WorkspaceView: NSSplitView, NSSplitViewDelegate {
 
     override var dividerColor: NSColor { Theme.gutterBorder }
 
-    init(gutterContainer: GutterContainerView) {
+    init(editorPane: EditorPaneView) {
         self.sidebar = SidebarView(frame: .zero)
-        self.gutterContainer = gutterContainer
+        self.editorPane = editorPane
         super.init(frame: .zero)
         isVertical = true
         dividerStyle = .thin
         delegate = self
         addSubview(sidebar)
-        addSubview(gutterContainer)
+        addSubview(editorPane)
         setHoldingPriority(.defaultHigh, forSubviewAt: 0)
         setHoldingPriority(.defaultLow,  forSubviewAt: 1)
     }

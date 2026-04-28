@@ -92,10 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         saveAsItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(saveAsItem)
         fileMenu.addItem(.separator())
-        fileMenu.addItem(NSMenuItem(
-            title: "Close",
-            action: #selector(NSWindow.performClose(_:)),
-            keyEquivalent: "w"))
+        let closeTabItem = NSMenuItem(title: "Close Tab",
+                                      action: #selector(Editor.closeActiveTab(_:)),
+                                      keyEquivalent: "w")
+        closeTabItem.target = editor
+        fileMenu.addItem(closeTabItem)
+        let closeWindowItem = NSMenuItem(title: "Close Window",
+                                         action: #selector(NSWindow.performClose(_:)),
+                                         keyEquivalent: "W")
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(closeWindowItem)
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
 
@@ -184,6 +190,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lineNumbersItem.state = SettingsStore.showLineNumbers ? .on : .off
         editor.lineNumbersMenuItem = lineNumbersItem
         configMenu.addItem(lineNumbersItem)
+
+        configMenu.addItem(.separator())
+        let nextTabItem = NSMenuItem(title: "Next Tab",
+                                     action: #selector(Editor.nextTab(_:)),
+                                     keyEquivalent: "]")
+        nextTabItem.target = editor
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        configMenu.addItem(nextTabItem)
+        let prevTabItem = NSMenuItem(title: "Previous Tab",
+                                     action: #selector(Editor.prevTab(_:)),
+                                     keyEquivalent: "[")
+        prevTabItem.target = editor
+        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
+        configMenu.addItem(prevTabItem)
 
         configItem.submenu = configMenu
         mainMenu.addItem(configItem)

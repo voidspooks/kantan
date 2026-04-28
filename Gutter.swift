@@ -8,6 +8,18 @@ final class GutterView: NSView {
     var gutterFont: NSFont = NSFont(name: "Menlo", size: 13)
         ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    /// Per-line git diff state for the active document. Empty when the file is
+    /// unmodified, untracked-but-empty, or outside a repo. Updated by Editor on
+    /// tab switch and after save.
+    private var lineChanges: [Int: LineChange.Kind] = [:]
+
+    func setLineChanges(_ changes: [LineChange]) {
+        var map: [Int: LineChange.Kind] = [:]
+        for c in changes { map[c.line] = c.kind }
+        lineChanges = map
+        needsDisplay = true
+    }
+
     init(textView: NSTextView, scrollView: NSScrollView) {
         self.textView = textView
         self.scrollView = scrollView
@@ -124,16 +136,35 @@ final class GutterView: NSView {
                        withAttributes: attrs)
         }
 
+        // 3px colored strip on the gutter's right edge for added/modified lines.
+        // Drawn over the right border so the strip "punches through" the separator
+        // at the line's y range — matches how VSCode marks diff hunks.
+        let stripWidth: CGFloat = 3
+        func drawDiffStrip(in fragment: NSRect, kind: LineChange.Kind) {
+            let y = fragment.origin.y + yOffset
+            if y + fragment.height < bounds.minY { return }
+            if y > bounds.maxY { return }
+            let color: NSColor = (kind == .added) ? Theme.gitUntracked : Theme.gitModified
+            color.setFill()
+            NSRect(x: bounds.maxX - stripWidth, y: y, width: stripWidth, height: fragment.height).fill()
+        }
+
         // Force layout of the visible portion before we query line fragment rects.
         let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: docVisibleRect, in: textContainer)
         layoutManager.ensureLayout(forGlyphRange: visibleGlyphRange)
 
         var lineNumber = 1
-        if let r = fragmentRect(forCharIndex: 0) { draw(lineNumber, in: r) }
+        if let r = fragmentRect(forCharIndex: 0) {
+            draw(lineNumber, in: r)
+            if let kind = lineChanges[lineNumber] { drawDiffStrip(in: r, kind: kind) }
+        }
 
         for i in 0..<length where nsText.character(at: i) == 0x0A {
             lineNumber += 1
-            if let r = fragmentRect(forCharIndex: i + 1) { draw(lineNumber, in: r) }
+            if let r = fragmentRect(forCharIndex: i + 1) {
+                draw(lineNumber, in: r)
+                if let kind = lineChanges[lineNumber] { drawDiffStrip(in: r, kind: kind) }
+            }
         }
     }
 }

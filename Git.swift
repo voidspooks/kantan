@@ -1,0 +1,219 @@
+import Foundation
+
+// MARK: - Git status (per-file untracked/modified flags)
+
+/// Snapshots `git status --porcelain` for a project root and exposes per-URL
+/// flags for the sidebar to color rows. Synchronous on purpose — typical repos
+/// finish in tens of milliseconds and we want results before the next render.
+/// Untracked directories cascade their state down to descendants because git
+/// reports an untracked directory as a single entry rather than enumerating
+/// every file inside it.
+final class GitStatus {
+    enum Kind {
+        case untracked
+        case modified
+    }
+
+    private var statuses: [String: Kind] = [:]
+    private var rootURL: URL?
+
+    /// Current branch name for the project root, or nil if the root isn't a git
+    /// repo (or HEAD is detached). Refreshed alongside per-file statuses so the
+    /// sidebar footer stays consistent with row colors.
+    private(set) var currentBranch: String?
+
+    func setRoot(_ url: URL?) {
+        rootURL = url
+        refresh()
+    }
+
+    func refresh() {
+        statuses = [:]
+        currentBranch = nil
+        guard let root = rootURL else { return }
+
+        guard let statusOutput = runGit(["status", "--porcelain"], in: root) else { return }
+
+        // `git branch --show-current` prints empty when HEAD is detached — leave
+        // currentBranch nil in that case so the footer stays hidden.
+        if let branch = runGit(["branch", "--show-current"], in: root), !branch.isEmpty {
+            currentBranch = branch
+        }
+
+        for line in statusOutput.components(separatedBy: "\n") where line.count >= 4 {
+            let xy = String(line.prefix(2))
+            var path = String(line.dropFirst(3))
+
+            // Renames and copies are reported as "old -> new"; we want the new path.
+            if xy.hasPrefix("R") || xy.hasPrefix("C") {
+                if let arrow = path.range(of: " -> ") {
+                    path = String(path[arrow.upperBound...])
+                }
+            }
+            // Git wraps paths containing spaces or odd chars in quotes; strip them.
+            if path.hasPrefix("\"") && path.hasSuffix("\"") && path.count >= 2 {
+                path = String(path.dropFirst().dropLast())
+            }
+            // Untracked directories have a trailing slash — normalize so the
+            // cascading lookup matches the FileNode's URL.path representation.
+            if path.hasSuffix("/") { path = String(path.dropLast()) }
+
+            let absolute = root.appendingPathComponent(path).path
+            statuses[absolute] = (xy == "??" ? .untracked : .modified)
+        }
+    }
+
+    /// Resolve a node's status. Direct hits short-circuit; otherwise we walk up
+    /// the path looking for an untracked ancestor (so files inside an untracked
+    /// folder still color green even though git only reported the folder).
+    func status(for url: URL) -> Kind? {
+        let directPath = url.path
+        if let direct = statuses[directPath] {
+            return direct
+        }
+        var path = directPath
+        while !path.isEmpty && path != "/" {
+            path = (path as NSString).deletingLastPathComponent
+            if statuses[path] == .untracked {
+                return .untracked
+            }
+        }
+        return nil
+    }
+
+    /// Run `git -C <root> <args...>` synchronously. Returns trimmed stdout, or
+    /// nil if the process couldn't start or exited non-zero (e.g. not a repo).
+    private func runGit(_ args: [String], in root: URL) -> String? {
+        let process = Process()
+        process.launchPath = "/usr/bin/env"
+        process.arguments = ["git", "-C", root.path] + args
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+// MARK: - Git diff (per-line change info for one file)
+
+/// Describes a line in the working-tree version of a file that's added or
+/// modified relative to HEAD. Line numbers are 1-based.
+struct LineChange {
+    enum Kind { case added, modified }
+    let line: Int
+    let kind: Kind
+}
+
+/// Computes per-line change info by running `git diff --unified=0` and parsing
+/// hunk headers. Untracked files (or files outside a git repo) are reported as
+/// "every line is added". Synchronous like `GitStatus` — the editor calls this
+/// only on file open + save, never on keystrokes.
+enum GitDiff {
+    static func changes(for url: URL) -> [LineChange] {
+        guard let root = repoRoot(containing: url) else { return [] }
+        let relative = relativePath(of: url, from: root)
+
+        if !isTracked(relative, in: root) {
+            return allLinesAdded(in: url)
+        }
+
+        guard let output = runGit(["diff", "--unified=0", "--no-color", "--", relative], in: root),
+              !output.isEmpty else {
+            return []
+        }
+        return parseUnifiedDiff(output)
+    }
+
+    private static func repoRoot(containing url: URL) -> URL? {
+        let fm = FileManager.default
+        var dir = url.deletingLastPathComponent()
+        while dir.path != "/" && !dir.path.isEmpty {
+            if fm.fileExists(atPath: dir.appendingPathComponent(".git").path) {
+                return dir
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        return nil
+    }
+
+    private static func relativePath(of url: URL, from root: URL) -> String {
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        if url.path.hasPrefix(rootPath) {
+            return String(url.path.dropFirst(rootPath.count))
+        }
+        return url.path
+    }
+
+    private static func isTracked(_ relative: String, in root: URL) -> Bool {
+        return runGit(["ls-files", "--error-unmatch", "--", relative], in: root) != nil
+    }
+
+    private static func allLinesAdded(in url: URL) -> [LineChange] {
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        // Count newline-separated lines, treating a trailing newline as terminating
+        // the previous line rather than starting a new empty one.
+        if content.isEmpty { return [] }
+        var n = content.components(separatedBy: "\n").count
+        if content.hasSuffix("\n") { n -= 1 }
+        guard n > 0 else { return [] }
+        return (1...n).map { LineChange(line: $0, kind: .added) }
+    }
+
+    /// Parse hunk headers (`@@ -A,B +C,D @@`). For each hunk:
+    ///   - newCount > 0, oldCount == 0  → pure addition (added)
+    ///   - newCount > 0, oldCount > 0   → replacement (modified)
+    ///   - newCount == 0                 → pure deletion (no current lines to mark)
+    private static let hunkRegex = try! NSRegularExpression(
+        pattern: #"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@"#)
+
+    private static func parseUnifiedDiff(_ output: String) -> [LineChange] {
+        var changes: [LineChange] = []
+        for raw in output.components(separatedBy: "\n") {
+            let nsLine = raw as NSString
+            let fullRange = NSRange(location: 0, length: nsLine.length)
+            guard let m = hunkRegex.firstMatch(in: raw, range: fullRange) else { continue }
+
+            func intAt(_ groupIndex: Int, default fallback: Int) -> Int {
+                let r = m.range(at: groupIndex)
+                if r.location == NSNotFound { return fallback }
+                return Int(nsLine.substring(with: r)) ?? fallback
+            }
+
+            let oldCount = intAt(2, default: 1)
+            let newStart = intAt(3, default: 0)
+            let newCount = intAt(4, default: 1)
+            if newCount == 0 || newStart == 0 { continue }
+
+            let kind: LineChange.Kind = (oldCount == 0) ? .added : .modified
+            for i in 0..<newCount {
+                changes.append(LineChange(line: newStart + i, kind: kind))
+            }
+        }
+        return changes
+    }
+
+    private static func runGit(_ args: [String], in root: URL) -> String? {
+        let process = Process()
+        process.launchPath = "/usr/bin/env"
+        process.arguments = ["git", "-C", root.path] + args
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do { try process.run() } catch { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)
+    }
+}

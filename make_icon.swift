@@ -8,7 +8,7 @@ guard CommandLine.arguments.count >= 2 else {
 let outPath = CommandLine.arguments[1]
 
 let size: CGFloat = 1024
-let bg = NSColor(red: 0x1a/255.0, green: 0x1a/255.0, blue: 0x1a/255.0, alpha: 1)
+let bg = NSColor.black
 let fg = NSColor(red: 0xe0/255.0, green: 0xa0/255.0, blue: 0x60/255.0, alpha: 1)
 
 let rep = NSBitmapImageRep(

@@ -17,6 +17,11 @@ enum Theme {
     static let gutterBorder     = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
 
     static let sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
+
+    // Git status colors used by the sidebar to flag untracked / modified files.
+    // Muted so the names still feel at home against the dark sidebar.
+    static let gitUntracked = NSColor(red: 0.49, green: 0.69, blue: 0.49, alpha: 1.0)
+    static let gitModified  = NSColor(red: 0.78, green: 0.69, blue: 0.42, alpha: 1.0)
     static let sidebarSelection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
 
     // Token defaults shared across languages.
