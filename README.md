@@ -1,6 +1,6 @@
 # Kantan 簡単
 
-![Kantan](app.png)
+![Kantan](kantan.png)
 
 A small text editor for macOS.
 
@@ -12,13 +12,13 @@ Editors are born light and grow heavy. Features arrive, settings multiply, and w
 
 The rule is plain: if a feature does not earn its place, it does not belong.
 
-What does this do? It makes Kantan *lightning fast*
+What does this do? It makes Kantan *lightning fast and responsive* and a delight to use, with it's simplified UI/UX experience.
 
 ## AI
 
 There is no AI integration for Kantan, and no plans for one in the future.
 
-Nothing against AI, but this editor is meant to be "just an editor" and doesn't try to be much else. Nor should it.
+Nothing against AI, (AI was actually used extensively in the development of this tool!) but this editor is meant to be **just an editor** and doesn't try to be much else.
 
 ## What it is
 

@@ -3,7 +3,7 @@ APP      := $(TARGET).app
 BIN      := $(APP)/Contents/MacOS/$(TARGET)
 PLIST    := Info.plist
 ICNS     := $(APP)/Contents/Resources/AppIcon.icns
-SRCS     := $(shell find . -name '*.swift' -not -path './.*' -not -path './$(APP)/*' -not -name 'make_icon.swift')
+SRCS     := $(shell find src -name '*.swift')
 SWIFTC   := swiftc
 SWIFTFLAGS := -O
 
@@ -22,6 +22,7 @@ $(APP)/Contents/Info.plist: $(PLIST)
 	cp $< $@
 
 icon.png: make_icon.swift
+	@mkdir -p build
 	$(SWIFTC) make_icon.swift -o build/make_icon
 	./build/make_icon $@
 
