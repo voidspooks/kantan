@@ -1,4 +1,69 @@
 import AppKit
+import CoreServices
+
+// MARK: - FSEvents directory watcher
+
+/// Watches a directory tree for changes using macOS FSEvents. Coalesces rapid
+/// bursts of events with a short latency so we don't spam `git status` on every
+/// individual write. The callback is debounced — only fires after the file system
+/// has been quiet for the debounce interval.
+final class DirectoryWatcher {
+    private var stream: FSEventStreamRef?
+    private let callback: () -> Void
+    private var debounceItem: DispatchWorkItem?
+    private let debounceInterval: TimeInterval = 1.0
+
+    init(directory: URL, callback: @escaping () -> Void) {
+        self.callback = callback
+
+        let paths = [directory.path] as CFArray
+        var context = FSEventStreamContext()
+        context.info = Unmanaged.passUnretained(self).toOpaque()
+
+        let flags = UInt32(
+            kFSEventStreamCreateFlagUseCFTypes |
+            kFSEventStreamCreateFlagNoDefer
+        )
+
+        guard let stream = FSEventStreamCreate(
+            nil,
+            { (_, info, _, _, _, _) in
+                guard let info = info else { return }
+                let watcher = Unmanaged<DirectoryWatcher>.fromOpaque(info).takeUnretainedValue()
+                watcher.scheduleDebouncedCallback()
+            },
+            &context,
+            paths,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            2.0,   // 2s FSEvents coalescing latency
+            flags
+        ) else { return }
+
+        self.stream = stream
+        FSEventStreamSetDispatchQueue(stream, DispatchQueue.global(qos: .utility))
+        FSEventStreamStart(stream)
+    }
+
+    private func scheduleDebouncedCallback() {
+        debounceItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.callback()
+        }
+        debounceItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: item)
+    }
+
+    func stop() {
+        debounceItem?.cancel()
+        guard let stream = stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
+    }
+
+    deinit { stop() }
+}
 
 // MARK: - File node (lazy directory tree)
 
@@ -142,6 +207,10 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// when the root changes and after any sidebar operation that touches files.
     private let gitStatus = GitStatus()
 
+    /// Watches the project directory for external changes (other editors, git
+    /// operations, build tools) and auto-refreshes git status + file tree.
+    private var directoryWatcher: DirectoryWatcher?
+
     // Footer: gray divider + branch icon + branch name. Hidden (height 0)
     // when the project root isn't a git repo.
     private let dividerView = NSView()
@@ -159,6 +228,10 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     /// Fired after an inline rename succeeds. The editor uses this to retarget
     /// `currentURL` if the renamed file is the one it has open.
     var onRename: ((_ from: URL, _ to: URL) -> Void)?
+
+    /// Fired when the file system watcher detects external changes. The editor
+    /// uses this to recompute gutter diff strips for the active tab.
+    var onExternalChange: (() -> Void)?
 
     // Inline-rename state. The text field is held weakly because cell views are
     // recycled — if the row scrolls offscreen mid-rename the field can vanish.
@@ -261,8 +334,15 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
     }
 
     func setRoot(_ url: URL?) {
+        directoryWatcher?.stop()
+        directoryWatcher = nil
+
         if let url = url {
             rootNode = FileNode(url: url)
+            directoryWatcher = DirectoryWatcher(directory: url) { [weak self] in
+                self?.refreshGitStatusAsync()
+                self?.onExternalChange?()
+            }
         } else {
             rootNode = nil
         }
@@ -285,6 +365,18 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         gitStatus.refresh()
         updateBranchFooter()
         outlineView.reloadData()
+    }
+
+    /// Non-blocking variant used by the file system watcher. Runs `git status`
+    /// on a background queue and dispatches UI updates back to the main thread.
+    private func refreshGitStatusAsync() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.gitStatus.refresh()
+            DispatchQueue.main.async { [weak self] in
+                self?.updateBranchFooter()
+                self?.outlineView.reloadData()
+            }
+        }
     }
 
     /// One-time wiring of the divider + branch row subviews. Layout constraints

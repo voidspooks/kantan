@@ -3,7 +3,7 @@ import AppKit
 // MARK: - App metadata
 
 enum App {
-    static let version = "0.1.0"
+    static let version = "1.0.0"
     static let nameJapanese = "簡単"
 }
 

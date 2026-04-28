@@ -8,10 +8,15 @@ final class GutterView: NSView {
     var gutterFont: NSFont = NSFont(name: "Menlo", size: 13)
         ?? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
 
+    /// Whether to draw line numbers. When false, only diff strips are drawn.
+    var showLineNumbers: Bool = true
+
     /// Per-line git diff state for the active document. Empty when the file is
     /// unmodified, untracked-but-empty, or outside a repo. Updated by Editor on
     /// tab switch and after save.
     private var lineChanges: [Int: LineChange.Kind] = [:]
+
+    private static let diffStripWidth: CGFloat = 3
 
     func setLineChanges(_ changes: [LineChange]) {
         var map: [Int: LineChange.Kind] = [:]
@@ -55,12 +60,18 @@ final class GutterView: NSView {
 
     /// Compute the ideal width based on the largest line number we'll need to draw,
     /// then ask whoever owns our layout to grow us. Returns the new width.
+    /// When line numbers are hidden, uses a slim width just for diff strips.
     @discardableResult
     func sizeToFitContent() -> CGFloat {
-        let lineCount = lineCountInTextView()
-        let digits = max(2, String(lineCount).count)
-        let sample = String(repeating: "9", count: digits) as NSString
-        let width = ceil(sample.size(withAttributes: [.font: gutterFont]).width) + 18
+        let width: CGFloat
+        if showLineNumbers {
+            let lineCount = lineCountInTextView()
+            let digits = max(2, String(lineCount).count)
+            let sample = String(repeating: "9", count: digits) as NSString
+            width = ceil(sample.size(withAttributes: [.font: gutterFont]).width) + 18
+        } else {
+            width = GutterView.diffStripWidth
+        }
         if abs(width - frame.width) > 0.5 {
             (superview as? GutterContainerView)?.gutterDidRequestWidth(width)
         }
@@ -79,16 +90,18 @@ final class GutterView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        Theme.gutterBackground.setFill()
-        bounds.fill()
+        if showLineNumbers {
+            Theme.gutterBackground.setFill()
+            bounds.fill()
 
-        // Right-edge separator (1px, drawn at integer x for crisp line)
-        Theme.gutterBorder.setStroke()
-        let border = NSBezierPath()
-        border.lineWidth = 1
-        border.move(to: NSPoint(x: bounds.maxX - 0.5, y: dirtyRect.minY))
-        border.line(to: NSPoint(x: bounds.maxX - 0.5, y: dirtyRect.maxY))
-        border.stroke()
+            // Right-edge separator (1px, drawn at integer x for crisp line)
+            Theme.gutterBorder.setStroke()
+            let border = NSBezierPath()
+            border.lineWidth = 1
+            border.move(to: NSPoint(x: bounds.maxX - 0.5, y: dirtyRect.minY))
+            border.line(to: NSPoint(x: bounds.maxX - 0.5, y: dirtyRect.maxY))
+            border.stroke()
+        }
 
         guard let textView = textView,
               let layoutManager = textView.layoutManager,
@@ -125,7 +138,7 @@ final class GutterView: NSView {
                 withoutAdditionalLayout: false)
         }
 
-        func draw(_ number: Int, in fragment: NSRect) {
+        func drawNumber(_ number: Int, in fragment: NSRect) {
             let y = fragment.origin.y + yOffset
             if y + fragment.height < bounds.minY { return }
             if y > bounds.maxY { return }
@@ -137,9 +150,7 @@ final class GutterView: NSView {
         }
 
         // 3px colored strip on the gutter's right edge for added/modified lines.
-        // Drawn over the right border so the strip "punches through" the separator
-        // at the line's y range — matches how VSCode marks diff hunks.
-        let stripWidth: CGFloat = 3
+        let stripWidth = GutterView.diffStripWidth
         func drawDiffStrip(in fragment: NSRect, kind: LineChange.Kind) {
             let y = fragment.origin.y + yOffset
             if y + fragment.height < bounds.minY { return }
@@ -155,14 +166,14 @@ final class GutterView: NSView {
 
         var lineNumber = 1
         if let r = fragmentRect(forCharIndex: 0) {
-            draw(lineNumber, in: r)
+            if showLineNumbers { drawNumber(lineNumber, in: r) }
             if let kind = lineChanges[lineNumber] { drawDiffStrip(in: r, kind: kind) }
         }
 
         for i in 0..<length where nsText.character(at: i) == 0x0A {
             lineNumber += 1
             if let r = fragmentRect(forCharIndex: i + 1) {
-                draw(lineNumber, in: r)
+                if showLineNumbers { drawNumber(lineNumber, in: r) }
                 if let kind = lineChanges[lineNumber] { drawDiffStrip(in: r, kind: kind) }
             }
         }
@@ -201,7 +212,6 @@ final class GutterContainerView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     func gutterDidRequestWidth(_ width: CGFloat) {
-        guard gutterVisible else { return }
         if abs(width - widthConstraint.constant) > 0.5 {
             widthConstraint.constant = width
         }
@@ -210,11 +220,7 @@ final class GutterContainerView: NSView {
     func setGutterVisible(_ visible: Bool) {
         if visible == gutterVisible { return }
         gutterVisible = visible
-        gutter.isHidden = !visible
-        if visible {
-            gutter.refresh()
-        } else {
-            widthConstraint.constant = 0
-        }
+        gutter.showLineNumbers = visible
+        gutter.refresh()
     }
 }

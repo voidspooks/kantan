@@ -157,6 +157,16 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
         workspaceView.sidebar.onRename = { [weak self] oldURL, newURL in
             self?.handleSidebarRename(from: oldURL, to: newURL)
         }
+        workspaceView.sidebar.onExternalChange = { [weak self] in
+            guard let self = self, let tab = self.activeTab, let url = tab.url else { return }
+            DispatchQueue.global(qos: .utility).async {
+                let changes = GitDiff.changes(for: url)
+                DispatchQueue.main.async { [weak self] in
+                    tab.lineChanges = changes
+                    self?.gutterView?.setLineChanges(changes)
+                }
+            }
+        }
 
         gutterView.refresh()
         workspaceView.sidebar.setRowFont(editorFont)
