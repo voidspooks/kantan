@@ -359,8 +359,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         outlineView.reloadData()
     }
 
-    /// Re-read git status without touching the file tree. Called by the editor
-    /// after a save so a freshly-modified file gets its yellow color immediately.
+    /// Re-read git status without touching the file tree.
     func refreshGitStatus() {
         gitStatus.refresh()
         updateBranchFooter()
@@ -852,10 +851,24 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
             .withSymbolConfiguration(config)
     }
 
+    /// Per-file overrides set directly by the editor when it knows a file's diff
+    /// state (e.g. after save). Takes priority over gitStatus lookups.
+    private var diffOverrides: [String: Bool] = [:]
+
+    /// Mark a file as modified (has changes) or clean based on diff results.
+    /// Immediately reloads the outline so the filename color updates.
+    func markFile(_ url: URL, hasChanges: Bool) {
+        diffOverrides[url.path] = hasChanges
+        outlineView.reloadData()
+    }
+
     /// Foreground color for a row's filename. Defaults to `Theme.sidebarText`,
     /// switching to muted green for untracked files and muted yellow for files
     /// git considers modified.
     private func textColor(for node: FileNode) -> NSColor {
+        if let override = diffOverrides[node.url.path] {
+            return override ? Theme.gitModified : Theme.sidebarText
+        }
         switch gitStatus.status(for: node.url) {
         case .untracked: return Theme.gitUntracked
         case .modified:  return Theme.gitModified

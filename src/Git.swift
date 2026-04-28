@@ -14,6 +14,7 @@ final class GitStatus {
         case modified
     }
 
+    private let lock = NSLock()
     private var statuses: [String: Kind] = [:]
     private var rootURL: URL?
 
@@ -23,58 +24,64 @@ final class GitStatus {
     private(set) var currentBranch: String?
 
     func setRoot(_ url: URL?) {
+        lock.lock()
         rootURL = url
+        lock.unlock()
         refresh()
     }
 
     func refresh() {
+        lock.lock()
         statuses = [:]
         currentBranch = nil
-        guard let root = rootURL else { return }
+        let root = rootURL
+        lock.unlock()
+        guard let root = root else { return }
 
         guard let statusOutput = runGit(["status", "--porcelain"], in: root) else { return }
 
-        // `git branch --show-current` prints empty when HEAD is detached — leave
-        // currentBranch nil in that case so the footer stays hidden.
         if let branch = runGit(["branch", "--show-current"], in: root), !branch.isEmpty {
+            lock.lock()
             currentBranch = branch
+            lock.unlock()
         }
 
+        var newStatuses: [String: Kind] = [:]
         for line in statusOutput.components(separatedBy: "\n") where line.count >= 4 {
             let xy = String(line.prefix(2))
             var path = String(line.dropFirst(3))
 
-            // Renames and copies are reported as "old -> new"; we want the new path.
             if xy.hasPrefix("R") || xy.hasPrefix("C") {
                 if let arrow = path.range(of: " -> ") {
                     path = String(path[arrow.upperBound...])
                 }
             }
-            // Git wraps paths containing spaces or odd chars in quotes; strip them.
             if path.hasPrefix("\"") && path.hasSuffix("\"") && path.count >= 2 {
                 path = String(path.dropFirst().dropLast())
             }
-            // Untracked directories have a trailing slash — normalize so the
-            // cascading lookup matches the FileNode's URL.path representation.
             if path.hasSuffix("/") { path = String(path.dropLast()) }
 
             let absolute = root.appendingPathComponent(path).path
-            statuses[absolute] = (xy == "??" ? .untracked : .modified)
+            newStatuses[absolute] = (xy == "??" ? .untracked : .modified)
         }
+
+        lock.lock()
+        statuses = newStatuses
+        lock.unlock()
     }
 
-    /// Resolve a node's status. Direct hits short-circuit; otherwise we walk up
-    /// the path looking for an untracked ancestor (so files inside an untracked
-    /// folder still color green even though git only reported the folder).
     func status(for url: URL) -> Kind? {
+        lock.lock()
+        let snap = statuses
+        lock.unlock()
         let directPath = url.path
-        if let direct = statuses[directPath] {
+        if let direct = snap[directPath] {
             return direct
         }
         var path = directPath
         while !path.isEmpty && path != "/" {
             path = (path as NSString).deletingLastPathComponent
-            if statuses[path] == .untracked {
+            if snap[path] == .untracked {
                 return .untracked
             }
         }

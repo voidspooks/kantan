@@ -525,6 +525,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             AppState.lastFile = url
             tab.lineChanges = GitDiff.changes(for: url)
             gutterView?.setLineChanges(tab.lineChanges)
+            workspaceView?.sidebar.markFile(url, hasChanges: !tab.lineChanges.isEmpty)
             rebuildTabBar()
             if url == SettingsStore.fileURL {
                 SettingsStore.loadAndApply()
@@ -534,9 +535,8 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
                 applyLineNumbersVisibility()
                 applyWorkspaceTheme()
             }
-            // Working-copy diverged from HEAD (or a new file appeared) — let the
-            // sidebar repaint git status so untracked/modified colors update live.
-            workspaceView?.sidebar.refreshGitStatus()
+            // The sidebar filename color was already updated via markFile above.
+            // The async file-system watcher will do a full git status refresh later.
         } catch {
             showError("Couldn't save file: \(error.localizedDescription)")
         }
