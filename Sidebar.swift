@@ -49,6 +49,30 @@ final class FileNode {
     }
 }
 
+// MARK: - Sidebar row view (custom selection drawing)
+
+/// Replaces the system's blue selection fill with a muted pill that matches the
+/// editor's dark aesthetic. Color comes from `Theme.sidebarSelection`.
+final class SidebarRowView: NSTableRowView {
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        let r = bounds.insetBy(dx: 5, dy: 1)
+        let path = NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4)
+        Theme.sidebarSelection.setFill()
+        path.fill()
+    }
+}
+
+// MARK: - Outline view (no system disclosure triangle)
+
+/// Hides the system-drawn disclosure triangle so we can render a chevron inside
+/// the cell's image slot — same x-position as a file's language icon.
+final class IconAlignedOutlineView: NSOutlineView {
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        return .zero
+    }
+}
+
 // MARK: - Sidebar (file tree)
 
 final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -63,7 +87,7 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     var onSelect: ((URL) -> Void)?
 
     override init(frame: NSRect) {
-        outlineView = NSOutlineView()
+        outlineView = IconAlignedOutlineView()
         scrollView = NSScrollView()
         super.init(frame: frame)
 
@@ -132,7 +156,9 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
     @objc private func handleClick(_ sender: Any?) {
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
-        if !node.isDirectory {
+        if node.isDirectory {
+            toggle(node)
+        } else {
             onSelect?(node.url)
         }
     }
@@ -141,11 +167,15 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileNode else { return }
         if node.isDirectory {
-            if outlineView.isItemExpanded(node) {
-                outlineView.collapseItem(node)
-            } else {
-                outlineView.expandItem(node)
-            }
+            toggle(node)
+        }
+    }
+
+    private func toggle(_ node: FileNode) {
+        if outlineView.isItemExpanded(node) {
+            outlineView.collapseItem(node)
+        } else {
+            outlineView.expandItem(node)
         }
     }
 
@@ -174,6 +204,10 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
 
     // MARK: NSOutlineViewDelegate
 
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        return SidebarRowView()
+    }
+
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? FileNode else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("FileCell")
@@ -183,6 +217,11 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
         } else {
             cell = NSTableCellView()
             cell.identifier = identifier
+            let imageView = NSImageView()
+            imageView.translatesAutoresizingMaskIntoConstraints = false
+            imageView.imageScaling = .scaleProportionallyDown
+            cell.addSubview(imageView)
+            cell.imageView = imageView
             let textField = NSTextField(labelWithString: "")
             textField.translatesAutoresizingMaskIntoConstraints = false
             textField.drawsBackground = false
@@ -194,14 +233,56 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate 
             cell.addSubview(textField)
             cell.textField = textField
             NSLayoutConstraint.activate([
-                textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                imageView.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                imageView.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                imageView.widthAnchor.constraint(equalToConstant: 14),
+                imageView.heightAnchor.constraint(equalToConstant: 14),
+                textField.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 4),
                 textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         }
         cell.textField?.stringValue = node.displayName
         cell.textField?.font = cellFont
+
+        // Reset before deciding — cells get reused, so a previous icon could otherwise
+        // bleed onto a folder or unrecognized file.
+        cell.imageView?.image = nil
+        cell.imageView?.contentTintColor = nil
+        if node.isDirectory {
+            let symbol = outlineView.isItemExpanded(node) ? "chevron.down" : "chevron.right"
+            cell.imageView?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            cell.imageView?.contentTintColor = Theme.sidebarText
+        } else {
+            var languageImage: NSImage? = nil
+            if let iconPath = Syntax.from(url: node.url)?.iconPath {
+                languageImage = IconCache.shared.image(forPath: iconPath) { [weak outlineView, weak node] in
+                    guard let outlineView = outlineView, let node = node else { return }
+                    outlineView.reloadItem(node)
+                }
+            }
+            if let languageImage = languageImage {
+                cell.imageView?.image = languageImage
+            } else {
+                // Fallback: generic text-document glyph for unknown extensions and as a
+                // placeholder while a language icon is still being fetched from the CDN.
+                cell.imageView?.image = NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil)
+                cell.imageView?.contentTintColor = Theme.sidebarText
+            }
+        }
         return cell
+    }
+
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        if let node = notification.userInfo?["NSObject"] as? FileNode {
+            outlineView.reloadItem(node)
+        }
+    }
+
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        if let node = notification.userInfo?["NSObject"] as? FileNode {
+            outlineView.reloadItem(node)
+        }
     }
 }
 
@@ -215,6 +296,8 @@ final class WorkspaceView: NSSplitView, NSSplitViewDelegate {
     private let defaultSidebarWidth: CGFloat = 220
     private let minSidebarWidth: CGFloat = 120
     private let minEditorWidth: CGFloat = 300
+
+    override var dividerColor: NSColor { Theme.gutterBorder }
 
     init(gutterContainer: GutterContainerView) {
         self.sidebar = SidebarView(frame: .zero)

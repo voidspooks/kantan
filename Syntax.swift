@@ -26,6 +26,8 @@ enum Syntax: Int, CaseIterable {
     case lua        = 20
     case bash       = 21
     case markdown   = 22
+    case css        = 23
+    case makefile   = 24
 
     var displayName: String {
         switch self {
@@ -52,6 +54,8 @@ enum Syntax: Int, CaseIterable {
         case .lua:        return "Lua"
         case .bash:       return "Bash"
         case .markdown:   return "Markdown"
+        case .css:        return "CSS"
+        case .makefile:   return "Makefile"
         }
     }
 
@@ -62,6 +66,40 @@ enum Syntax: Int, CaseIterable {
         case .cpp:    return "cpp"
         case .csharp: return "csharp"
         default:      return displayName.lowercased()
+        }
+    }
+
+    /// Devicon path component (e.g. "python/python-original") used to fetch the SVG
+    /// from jsDelivr. nil for languages devicon doesn't carry. Variant choices follow
+    /// devicon's repo: most languages have `-original`, a few only ship `-plain`, and
+    /// Go's icon is the gopher logo (`-original-logo`).
+    var iconPath: String? {
+        switch self {
+        case .ruby:       return "ruby/ruby-original"
+        case .yaml:       return "yaml/yaml-original"
+        case .swift:      return "swift/swift-original"
+        case .javascript: return "javascript/javascript-original"
+        case .html:       return "html5/html5-original"
+        case .python:     return "python/python-original"
+        case .typescript: return "typescript/typescript-original"
+        case .java:       return "java/java-original"
+        case .c:          return "c/c-original"
+        case .cpp:        return "cplusplus/cplusplus-original"
+        case .csharp:     return "csharp/csharp-original"
+        case .php:        return "php/php-original"
+        case .go:         return "go/go-original-logo"
+        case .rust:       return "rust/rust-original"
+        case .kotlin:     return "kotlin/kotlin-original"
+        case .sql:        return nil
+        case .r:          return "r/r-original"
+        case .dart:       return "dart/dart-original"
+        case .scala:      return "scala/scala-original"
+        case .perl:       return "perl/perl-original"
+        case .lua:        return "lua/lua-plain"
+        case .bash:       return "bash/bash-original"
+        case .markdown:   return "markdown/markdown-original"
+        case .css:        return "css3/css3-original"
+        case .makefile:   return nil
         }
     }
 
@@ -90,8 +128,27 @@ enum Syntax: Int, CaseIterable {
         case "lua":                                             return .lua
         case "sh", "bash", "zsh":                               return .bash
         case "md", "markdown", "mdown", "mkd":                  return .markdown
+        case "css":                                             return .css
+        case "mk", "make":                                      return .makefile
         default:                                                return nil
         }
+    }
+
+    /// Match by filename (case-insensitive) for languages whose canonical files
+    /// have no extension — currently just Makefile.
+    static func from(filename name: String) -> Syntax? {
+        switch name.lowercased() {
+        case "makefile", "gnumakefile", "bsdmakefile": return .makefile
+        default:                                       return nil
+        }
+    }
+
+    /// Convenience that prefers extension, then filename.
+    static func from(url: URL) -> Syntax? {
+        if let byExt = from(extension: url.pathExtension.lowercased()) {
+            return byExt
+        }
+        return from(filename: url.lastPathComponent)
     }
 
     func highlight(_ storage: NSTextStorage) {
@@ -119,6 +176,8 @@ enum Syntax: Int, CaseIterable {
         case .lua:        LuaHighlighter.highlight(storage)
         case .bash:       BashHighlighter.highlight(storage)
         case .markdown:   MarkdownHighlighter.highlight(storage)
+        case .css:        CSSHighlighter.highlight(storage)
+        case .makefile:   MakefileHighlighter.highlight(storage)
         }
     }
 }

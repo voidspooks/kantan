@@ -301,7 +301,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
             let content = try String(contentsOf: url, encoding: .utf8)
             // Pick the syntax BEFORE the storage delegate fires, so the very first
             // didProcessEditing pass already paints with the right highlighter.
-            activeSyntax = Syntax.from(extension: url.pathExtension.lowercased())
+            activeSyntax = Syntax.from(url: url)
             replaceContent(with: content)
             currentURL = url
             dirty = false
@@ -427,7 +427,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindo
     /// If the extension is recognized and highlighting was off, turn it on.
     /// If highlighting was already on, repaint under the new (or no) syntax.
     private func selectSyntax(for url: URL) {
-        let next = Syntax.from(extension: url.pathExtension.lowercased())
+        let next = Syntax.from(url: url)
         let changed = next != activeSyntax
         activeSyntax = next
         if next != nil && !syntaxHighlightingEnabled {

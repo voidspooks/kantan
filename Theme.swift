@@ -14,7 +14,7 @@ enum Theme {
 
     static let sidebarBackground = NSColor(red: 0.108, green: 0.108, blue: 0.118, alpha: 1.0)
     static let sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
-    static let sidebarSelection  = NSColor(red: 0.16,  green: 0.31,  blue: 0.50,  alpha: 1.0)
+    static let sidebarSelection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
 
     // Token defaults shared across languages.
     private static let dKeyword  = NSColor(red: 0.776, green: 0.522, blue: 0.753, alpha: 1.0)
@@ -206,6 +206,22 @@ enum Theme {
             "list":       dKeyword,
             "blockquote": dComment,
             "rule":       dComment,
+        ],
+        "css": [
+            "selector": dSymbol,
+            "property": dVariable,
+            "string":   dString,
+            "comment":  dComment,
+            "number":   dNumber,
+            "constant": dConstant,
+            "keyword":  dKeyword,
+        ],
+        "makefile": [
+            "comment":  dComment,
+            "string":   dString,
+            "keyword":  dKeyword,
+            "variable": dVariable,
+            "target":   dSymbol,
         ],
     ]
 

@@ -75,6 +75,12 @@ indent:
   markdown:
     style: space
     width: 2
+  css:
+    style: space
+    width: 2
+  makefile:
+    style: tab
+    width: 1
 
 syntax_highlighting:
   ruby:
@@ -233,6 +239,20 @@ syntax_highlighting:
     list:       "#c685c0"
     blockquote: "#6b9955"
     rule:       "#6b9955"
+  css:
+    selector: "#569cd6"
+    property: "#9cdcfe"
+    string:   "#ce9178"
+    comment:  "#6b9955"
+    number:   "#b5cea8"
+    constant: "#4ec9b0"
+    keyword:  "#c685c0"
+  makefile:
+    comment:  "#6b9955"
+    string:   "#ce9178"
+    keyword:  "#c685c0"
+    variable: "#9cdcfe"
+    target:   "#569cd6"
 """
 
 // MARK: - Indent config
@@ -318,6 +338,8 @@ enum SettingsStore {
         "lua":        IndentConfig(style: .space, width: 2),
         "bash":       IndentConfig(style: .space, width: 2),
         "markdown":   IndentConfig(style: .space, width: 2),
+        "css":        IndentConfig(style: .space, width: 2),
+        "makefile":   IndentConfig(style: .tab,   width: 1),
     ]
     static var indentByLanguage: [String: IndentConfig] = defaultIndents
 

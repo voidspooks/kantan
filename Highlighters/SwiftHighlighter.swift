@@ -29,11 +29,13 @@ enum SwiftHighlighter {
         return try! NSRegularExpression(pattern: pattern)
     }()
 
-    // Triple-quoted (multi-line) strings must come first so the engine doesn't
-    // greedily match a single `"` and stop early. Block comments are likewise
-    // listed before line comments so `/*` isn't truncated to `/`.
+    // Order matters: extended raw delimiters (`#"..."#`, `##"..."##`, …) first so the
+    // inner `"` characters don't open a fake plain string. Triple-quoted variants come
+    // before single-quoted so a `"""` isn't truncated to `""`. Block comments precede
+    // line comments so `/*` isn't truncated to `/`. Backreferences (`\1`, `\2`) make the
+    // closing delimiter match the opener's `#` count.
     private static let stringOrCommentRegex = try! NSRegularExpression(
-        pattern: #""""[\s\S]*?"""|/\*[\s\S]*?\*/|//[^\n]*|"(?:\\.|[^"\\])*""#)
+        pattern: ##"(#+)"""[\s\S]*?"""\1|"""[\s\S]*?"""|(#+)"[^\n]*?"\2|/\*[\s\S]*?\*/|//[^\n]*|"(?:\\.|[^"\\])*""##)
 
     private static let numberRegex    = try! NSRegularExpression(
         pattern: #"\b(?:0x[0-9a-fA-F][0-9a-fA-F_]*|0b[01][01_]*|0o[0-7][0-7_]*|\d[\d_]*(?:\.[\d_]+)?(?:[eE][+-]?\d+)?)\b"#)
