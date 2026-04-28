@@ -5,6 +5,20 @@ import AppKit
 let defaultSettingsYAML = """
 line_numbers: true
 
+indent:
+  ruby:
+    style: space
+    width: 2
+  yaml:
+    style: space
+    width: 2
+  swift:
+    style: space
+    width: 4
+  javascript:
+    style: space
+    width: 2
+
 syntax_highlighting:
   ruby:
     keyword:  "#c685c0"
@@ -35,6 +49,23 @@ syntax_highlighting:
     constant: "#4ec9b0"
 """
 
+// MARK: - Indent config
+
+struct IndentConfig {
+    enum Style { case tab, space }
+    var style: Style
+    var width: Int
+
+    static let fallback = IndentConfig(style: .space, width: 4)
+
+    var unitString: String {
+        switch style {
+        case .tab:   return String(repeating: "\t", count: width)
+        case .space: return String(repeating: " ", count: width)
+        }
+    }
+}
+
 // MARK: - Settings (settings.yaml on disk)
 
 enum SettingsStore {
@@ -44,6 +75,14 @@ enum SettingsStore {
     }
 
     static var showLineNumbers: Bool = true
+
+    static let defaultIndents: [String: IndentConfig] = [
+        "ruby":       IndentConfig(style: .space, width: 2),
+        "yaml":       IndentConfig(style: .space, width: 2),
+        "swift":      IndentConfig(style: .space, width: 4),
+        "javascript": IndentConfig(style: .space, width: 2),
+    ]
+    static var indentByLanguage: [String: IndentConfig] = defaultIndents
 
     /// Ensure the settings directory and file exist on disk; then load and apply the colors.
     static func bootstrap() {
@@ -68,6 +107,74 @@ enum SettingsStore {
             Theme.apply(language, colors)
         }
         showLineNumbers = parseTopLevelBool("line_numbers", in: text) ?? true
+
+        var merged = defaultIndents
+        for (lang, cfg) in parseIndent(text) {
+            merged[lang] = cfg
+        }
+        indentByLanguage = merged
+    }
+
+    /// Parse the `indent:` block. Each language has a `style: tab|space` and `width: <int>`.
+    /// Anything outside that shape is ignored.
+    static func parseIndent(_ text: String) -> [String: IndentConfig] {
+        var result: [String: IndentConfig] = [:]
+        var inIndent = false
+        var currentLanguage: String? = nil
+        var currentStyle: IndentConfig.Style = .space
+        var currentWidth: Int = 4
+
+        func commit() {
+            if let lang = currentLanguage {
+                result[lang] = IndentConfig(style: currentStyle, width: currentWidth)
+            }
+            currentLanguage = nil
+        }
+
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#") {
+                line = String(line[..<hash])
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+
+            if indent == 0 {
+                commit()
+                inIndent = trimmed.hasPrefix("indent:")
+                continue
+            }
+            if !inIndent { continue }
+            if indent == 2 {
+                commit()
+                if let colon = trimmed.firstIndex(of: ":") {
+                    currentLanguage = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
+                    currentStyle = .space
+                    currentWidth = 4
+                }
+                continue
+            }
+            if indent >= 4, currentLanguage != nil {
+                guard let colon = trimmed.firstIndex(of: ":") else { continue }
+                let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces)
+                var value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+                    value = String(value.dropFirst().dropLast())
+                }
+                switch key {
+                case "style":
+                    if value == "tab" || value == "tabs" { currentStyle = .tab }
+                    else if value == "space" || value == "spaces" { currentStyle = .space }
+                case "width":
+                    if let n = Int(value), n >= 0 { currentWidth = n }
+                default:
+                    break
+                }
+            }
+        }
+        commit()
+        return result
     }
 
     /// Update `showLineNumbers` and persist the new value to settings.yaml.

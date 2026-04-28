@@ -2,7 +2,7 @@ import AppKit
 
 // MARK: - Editor
 
-final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
+final class Editor: NSObject, NSTextStorageDelegate, NSTextViewDelegate, NSWindowDelegate {
     var window: NSWindow!
     var textView: NSTextView!
     var gutterView: GutterView!
@@ -89,6 +89,7 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         ]
 
         textView.textStorage?.delegate = self
+        textView.delegate = self
 
         scrollView.documentView = textView
 
@@ -113,6 +114,48 @@ final class Editor: NSObject, NSTextStorageDelegate, NSWindowDelegate {
         window.makeFirstResponder(textView)
 
         updateTitle()
+    }
+
+    // MARK: NSTextViewDelegate
+
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            insertNewlineWithIndent(in: textView)
+            return true
+        }
+        return false
+    }
+
+    private func insertNewlineWithIndent(in textView: NSTextView) {
+        let nsText = textView.string as NSString
+        let selRange = textView.selectedRange()
+        let cursor = selRange.location
+        let lineStart = nsText.lineRange(for: NSRange(location: cursor, length: 0)).location
+
+        let beforeCursor = cursor > lineStart
+            ? nsText.substring(with: NSRange(location: lineStart, length: cursor - lineStart))
+            : ""
+
+        var leading = ""
+        for ch in beforeCursor {
+            if ch == " " || ch == "\t" { leading.append(ch) } else { break }
+        }
+
+        let trimmed = beforeCursor.trimmingCharacters(in: .whitespaces)
+        let opensBlock: Bool
+        switch trimmed.last {
+        case "{", "[", "(": opensBlock = true
+        default:            opensBlock = false
+        }
+
+        var insertion = "\n" + leading
+        if opensBlock {
+            let key = activeSyntax?.displayName.lowercased() ?? ""
+            let cfg = SettingsStore.indentByLanguage[key] ?? IndentConfig.fallback
+            insertion += cfg.unitString
+        }
+
+        textView.insertText(insertion, replacementRange: selRange)
     }
 
     // MARK: NSTextStorageDelegate
