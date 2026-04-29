@@ -23,6 +23,15 @@ enum HTMLHighlighter {
     private static let stringRegex = try! NSRegularExpression(
         pattern: #""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'"#)
 
+    // Embedded blocks. Capture 1 is the inner content so we can re-run a sub-language
+    // highlighter over just that range. `[\s\S]` matches newlines without enabling the
+    // dotall flag, and `*?` keeps us from swallowing across multiple style/script blocks.
+    private static let styleBlockRegex = try! NSRegularExpression(
+        pattern: #"<style\b[^>]*>([\s\S]*?)</style>"#, options: [.caseInsensitive])
+
+    private static let scriptBlockRegex = try! NSRegularExpression(
+        pattern: #"<script\b[^>]*>([\s\S]*?)</script>"#, options: [.caseInsensitive])
+
     static func highlight(_ storage: NSTextStorage) {
         let text = storage.string
         let fullRange = NSRange(location: 0, length: (text as NSString).length)
@@ -79,5 +88,30 @@ enum HTMLHighlighter {
                 storage.addAttribute(.foregroundColor, value: stringColor, range: sm.range)
             }
         }
+
+        // Re-run sub-language highlighters over the inner content of <style> and <script>.
+        // We highlight a detached NSTextStorage holding just the substring so the
+        // sub-language regexes (some of which anchor on `^`) see a clean start, then
+        // copy the resulting foreground attributes back to the parent at the offset.
+        let nsText = text as NSString
+        func applyEmbedded(_ regex: NSRegularExpression, _ run: (NSTextStorage) -> Void) {
+            regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
+                guard let m = match else { return }
+                let inner = m.range(at: 1)
+                if inner.location == NSNotFound || inner.length == 0 { return }
+                let snippet = nsText.substring(with: inner)
+                let temp = NSTextStorage(string: snippet)
+                run(temp)
+                let tempRange = NSRange(location: 0, length: temp.length)
+                temp.enumerateAttribute(.foregroundColor, in: tempRange, options: []) { value, r, _ in
+                    guard let color = value as? NSColor else { return }
+                    let target = NSRange(location: inner.location + r.location, length: r.length)
+                    storage.addAttribute(.foregroundColor, value: color, range: target)
+                }
+            }
+        }
+
+        applyEmbedded(styleBlockRegex)  { CSSHighlighter.highlight($0) }
+        applyEmbedded(scriptBlockRegex) { JavaScriptHighlighter.highlight($0) }
     }
 }
