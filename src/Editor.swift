@@ -7,7 +7,10 @@ import AppKit
 // and swaps the active one in/out of its NSTextView.
 
 final class DocumentTab {
+    enum Kind { case editor, terminal }
+
     let id = UUID()
+    let kind: Kind
     var url: URL?
     var dirty = false
     let textStorage: NSTextStorage
@@ -19,7 +22,11 @@ final class DocumentTab {
     /// added/modified strips. Recomputed on file open and on save.
     var lineChanges: [LineChange] = []
 
+    /// Set only when kind == .terminal. Owns the PTY, parser, and view.
+    var terminal: TerminalState?
+
     init(url: URL?, content: String, syntax: Syntax?, font: NSFont) {
+        self.kind = .editor
         self.url = url
         self.activeSyntax = syntax
         let attrs: [NSAttributedString.Key: Any] = [
@@ -29,7 +36,21 @@ final class DocumentTab {
         self.textStorage = NSTextStorage(string: content, attributes: attrs)
     }
 
-    var displayName: String { url?.lastPathComponent ?? "Untitled" }
+    /// Construct a tab that hosts a live shell. The PTY isn't started here —
+    /// the caller invokes `terminal!.start()` once the tab is wired into a
+    /// pane so the initial size is accurate.
+    init(terminalFont: NSFont) {
+        self.kind = .terminal
+        self.url = nil
+        self.activeSyntax = nil
+        self.textStorage = NSTextStorage()
+        self.terminal = TerminalState(font: terminalFont)
+    }
+
+    var displayName: String {
+        if kind == .terminal { return "Terminal" }
+        return url?.lastPathComponent ?? "Untitled"
+    }
 }
 
 // MARK: - EditorTextView
@@ -105,6 +126,13 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     var onActiveTabChanged: (() -> Void)?
     var onLastTabClosed: (() -> Void)?
     var onSplitRequested: ((NSUserInterfaceLayoutOrientation, Int) -> Void)?
+    /// Right-click action: create a new pane with a terminal in the chosen
+    /// orientation. The source tab stays put — unlike `onSplitRequested`,
+    /// nothing is moved between panes.
+    var onNewTerminalSplit: ((NSUserInterfaceLayoutOrientation) -> Void)?
+    /// Right-click action: convert the tab at the given index into a terminal,
+    /// replacing whatever editor content was there.
+    var onSetAsTerminal: ((Int) -> Void)?
     /// User clicked the X on a tab. The editor handles the dirty-confirm
     /// prompt and then calls back into `closeTab(at:)`.
     var onTabCloseRequested: ((Int) -> Void)?
@@ -229,8 +257,27 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         tabBar.needsDisplay = true
     }
 
+    /// View that should take first responder when this pane is activated.
+    /// For editor tabs that's the editor's text view; for terminal tabs it's
+    /// the terminal's text view, so typing routes to the shell.
+    var preferredFirstResponder: NSView {
+        if let term = activeTab?.terminal { return term.view }
+        return textView
+    }
+
     func applyLineNumbersVisible(_ visible: Bool) {
         gutterContainer.setGutterVisible(visible)
+        // The gutter's width change shifts the scroll view's frame. AppKit can
+        // leave the clip view's horizontal origin past the text view's leading
+        // inset after that relayout, which visually crops the margin against
+        // the gutter. Flush the layout and snap horizontal scroll back to 0.
+        gutterContainer.layoutSubtreeIfNeeded()
+        let clip = scrollView.contentView
+        if clip.bounds.origin.x != 0 {
+            var origin = clip.bounds.origin
+            origin.x = 0
+            clip.bounds.origin = origin
+        }
     }
 
     func setFont(_ font: NSFont) {
@@ -284,6 +331,40 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         switchToTab(at: tabs.count - 1)
     }
 
+    /// Create a new terminal tab in this pane and focus it. Spawns the shell
+    /// process synchronously; the PTY size is refined when the view lays out.
+    func newTerminalTab() {
+        let tab = DocumentTab(terminalFont: editorFont)
+        wireTerminalLifecycle(tab)
+        tabs.append(tab)
+        switchToTab(at: tabs.count - 1)
+        tab.terminal?.start()
+    }
+
+    /// Replace the tab at `index` with a fresh terminal tab. Editor content at
+    /// that slot is discarded — the caller is expected to confirm any unsaved
+    /// changes before invoking this.
+    func setTabAsTerminal(at index: Int) {
+        guard index >= 0, index < tabs.count else { return }
+        let tab = DocumentTab(terminalFont: editorFont)
+        wireTerminalLifecycle(tab)
+        tabs[index] = tab
+        switchToTab(at: index, force: true)
+        tab.terminal?.start()
+    }
+
+    private func wireTerminalLifecycle(_ tab: DocumentTab) {
+        tab.terminal?.onShellExit = { [weak self, weak tab] in
+            guard let self = self, let tab = tab,
+                  let i = self.tabs.firstIndex(where: { $0 === tab }) else { return }
+            // Shell exited (user typed `exit` or process died). Drop the tab.
+            self.onTabCloseRequested?(i)
+        }
+        tab.terminal?.view.textView.onBecomeFirstResponder = { [weak self] in
+            self?.onActivated?()
+        }
+    }
+
     /// Open `url` in this pane. If a tab for the URL already exists in this
     /// pane, it is focused. If the active tab is an empty Untitled buffer, it
     /// is replaced. Returns the loaded DocumentTab on success, nil on failure.
@@ -323,13 +404,26 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         guard index >= 0, index < tabs.count else { return }
         if !force, activeTabIndex == index { return }
 
-        if let active = activeTab {
+        if let active = activeTab, active.kind == .editor {
             active.selectedRange = textView.selectedRange()
             active.scrollY = textView.enclosingScrollView?.contentView.bounds.origin.y ?? 0
         }
 
         activeTabIndex = index
         let tab = tabs[index]
+
+        if tab.kind == .terminal, let term = tab.terminal {
+            paneView.setActiveContent(term.view)
+            term.view.focusInput()
+            rebuildTabBar()
+            onActiveTabChanged?()
+            onTitleStateChanged?()
+            return
+        }
+
+        // Editor path: rebind the text view to this tab's storage and restore
+        // the editor chrome (gutter, line numbers, cursor position).
+        paneView.setActiveContent(gutterContainer)
 
         if let lm = textView.layoutManager,
            lm.textStorage !== tab.textStorage {
@@ -371,6 +465,7 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     func closeTab(at index: Int) -> DocumentTab? {
         guard index >= 0, index < tabs.count else { return nil }
         let tab = tabs[index]
+        tab.terminal?.session.terminate()
         tabs.remove(at: index)
         if tabs.isEmpty {
             activeTabIndex = nil
@@ -410,8 +505,10 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     /// Adjusts active index and switches to a remaining tab. Returns the tab.
     func detachTab(at index: Int) -> DocumentTab? {
         guard index >= 0, index < tabs.count else { return nil }
-        // Save view state on the active tab so it survives the transfer.
-        if let active = activeTab, activeTabIndex == index {
+        // Save editor view state on the active tab so it survives the transfer.
+        // Terminal tabs carry their state inside TerminalState (cursor, buffer,
+        // session) so they don't need anything captured from the editor view.
+        if let active = activeTab, activeTabIndex == index, active.kind == .editor {
             active.selectedRange = textView.selectedRange()
             active.scrollY = textView.enclosingScrollView?.contentView.bounds.origin.y ?? 0
         }
@@ -441,12 +538,18 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     /// Used by the editor when transferring a tab from another pane.
     func adoptTab(_ tab: DocumentTab, at index: Int) {
         let clamped = max(0, min(index, tabs.count))
-        tab.textStorage.delegate = self
+        if tab.kind == .editor {
+            tab.textStorage.delegate = self
+            // Re-apply current font to the adopted tab in case the source
+            // pane had a different size.
+            let full = NSRange(location: 0, length: tab.textStorage.length)
+            tab.textStorage.addAttribute(.font, value: editorFont, range: full)
+        } else {
+            // Terminal tab moved between panes — re-wire the shell-exit hook
+            // to this pane's tab list and snap the buffer's font.
+            wireTerminalLifecycle(tab)
+        }
         tabs.insert(tab, at: clamped)
-        // Re-apply current font to the adopted tab in case the source pane
-        // had a different size.
-        let full = NSRange(location: 0, length: tab.textStorage.length)
-        tab.textStorage.addAttribute(.font, value: editorFont, range: full)
         switchToTab(at: clamped, force: true)
     }
 
@@ -483,6 +586,25 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
 
     private func showTabContextMenu(forTabAt index: Int, event: NSEvent) {
         let menu = NSMenu()
+
+        let termV = NSMenuItem(title: "New Terminal (Split Vertically)",
+                               action: #selector(handleNewTerminalSplitVertically(_:)),
+                               keyEquivalent: "")
+        termV.target = self
+        let termH = NSMenuItem(title: "New Terminal (Split Horizontally)",
+                               action: #selector(handleNewTerminalSplitHorizontally(_:)),
+                               keyEquivalent: "")
+        termH.target = self
+        let setAsTerm = NSMenuItem(title: "Set as Terminal",
+                                   action: #selector(handleSetAsTerminal(_:)),
+                                   keyEquivalent: "")
+        setAsTerm.target = self
+        setAsTerm.representedObject = index
+        menu.addItem(termV)
+        menu.addItem(termH)
+        menu.addItem(setAsTerm)
+        menu.addItem(.separator())
+
         let splitV = NSMenuItem(title: "Split Vertically",
                                 action: #selector(handleSplitVertically(_:)),
                                 keyEquivalent: "")
@@ -506,6 +628,19 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
     @objc private func handleSplitHorizontally(_ sender: NSMenuItem) {
         guard let idx = sender.representedObject as? Int else { return }
         onSplitRequested?(.vertical, idx)
+    }
+
+    @objc private func handleNewTerminalSplitVertically(_ sender: NSMenuItem) {
+        onNewTerminalSplit?(.horizontal)
+    }
+
+    @objc private func handleNewTerminalSplitHorizontally(_ sender: NSMenuItem) {
+        onNewTerminalSplit?(.vertical)
+    }
+
+    @objc private func handleSetAsTerminal(_ sender: NSMenuItem) {
+        guard let idx = sender.representedObject as? Int else { return }
+        onSetAsTerminal?(idx)
     }
 
     // MARK: - NSTextViewDelegate
@@ -985,6 +1120,14 @@ final class Editor: NSObject, NSWindowDelegate {
             guard let self = self, let pane = pane else { return }
             self.splitPane(pane, takingTabAt: tabIndex, orientation: orientation)
         }
+        pane.onNewTerminalSplit = { [weak self] orientation in
+            guard let self = self else { return }
+            self.openNewTerminalSplit(orientation: orientation)
+        }
+        pane.onSetAsTerminal = { [weak pane] index in
+            guard let pane = pane else { return }
+            pane.setTabAsTerminal(at: index)
+        }
         pane.onTabDropOutsideBar = { [weak self, weak pane] sourceIndex, windowPoint in
             guard let self = self, let pane = pane else { return false }
             return self.handleCrossPaneDrop(from: pane, sourceIndex: sourceIndex, windowPoint: windowPoint)
@@ -1005,10 +1148,12 @@ final class Editor: NSObject, NSWindowDelegate {
         // tracks the focused pane rather than the previous one.
         pane.pushCursorPosition()
         // If activation came from a tab-bar click rather than a textView
-        // click, the pane's text view still needs to take first-responder so
-        // typing lands in the right pane.
-        if window?.firstResponder !== pane.textView {
-            window?.makeFirstResponder(pane.textView)
+        // click, the pane's preferred input view still needs to take first
+        // responder so typing lands in the right pane (and in the right kind
+        // of content — terminal vs editor).
+        let target = pane.preferredFirstResponder
+        if window?.firstResponder !== target {
+            window?.makeFirstResponder(target)
         }
     }
 
@@ -1072,7 +1217,7 @@ final class Editor: NSObject, NSWindowDelegate {
         panes.remove(at: idx)
         let next = panes.first!
         focusedPane = next
-        window.makeFirstResponder(next.textView)
+        window.makeFirstResponder(next.preferredFirstResponder)
         updateTitle()
         refreshLanguageMenuChecks()
         AppState.lastFile = next.activeTab?.url
@@ -1127,6 +1272,35 @@ final class Editor: NSObject, NSWindowDelegate {
         updateTitle()
     }
 
+    /// Cmd+Shift+T action. Open a new pane with a terminal tab; if a split
+    /// already exists, drop the terminal tab into the *other* pane (mirroring
+    /// `newSplit` so the keystroke is predictable).
+    @objc func newTerminalSplit(_ sender: Any?) {
+        openNewTerminalSplit(orientation: SettingsStore.terminalSplitOrientation)
+    }
+
+    /// Open a new terminal in another pane. If only one pane exists, create
+    /// a split in the requested orientation; otherwise reuse the existing
+    /// non-focused pane.
+    fileprivate func openNewTerminalSplit(orientation: NSUserInterfaceLayoutOrientation) {
+        if panes.count >= 2 {
+            let other = panes.first(where: { $0 !== focusedPane }) ?? focusedPane!
+            other.newTerminalTab()
+            focusedPane = other
+            updateTitle()
+            return
+        }
+        let newPane = makePane()
+        panes.append(newPane)
+        workspaceView.addPane(newPane.paneView, orientation: orientation)
+        newPane.setFont(editorFont)
+        newPane.setSyntaxHighlighting(syntaxHighlightingEnabled)
+        newPane.applyLineNumbersVisible(SettingsStore.showLineNumbers)
+        newPane.newTerminalTab()
+        focusedPane = newPane
+        updateTitle()
+    }
+
     // MARK: - Cross-pane tab dragging
 
     /// Called by a pane when a tab drag ends with the cursor outside its own
@@ -1143,7 +1317,7 @@ final class Editor: NSObject, NSWindowDelegate {
         guard let detached = source.detachTab(at: sourceIndex) else { return false }
         target.adoptTab(detached, at: insertIndex)
         focusedPane = target
-        window.makeFirstResponder(target.textView)
+        window.makeFirstResponder(target.preferredFirstResponder)
         updateTitle()
         return true
     }

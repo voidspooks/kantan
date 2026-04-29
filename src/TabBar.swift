@@ -328,9 +328,10 @@ final class TabItemView: NSView {
         Theme.gutterBorder.setFill()
         // Bottom border
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
-        // Left border
-        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
-        // Right border
+        // Right border — also serves as the divider before the next tab.
+        // We deliberately omit a left border so the leftmost tab doesn't double
+        // up with the workspace split divider, and so adjacent tabs share a
+        // single 1pt line rather than stacking right-of-N and left-of-N+1.
         NSRect(x: bounds.maxX - 1, y: 0, width: 1, height: bounds.height).fill()
 
         if isActive {
@@ -394,27 +395,52 @@ final class TabItemView: NSView {
 
 final class EditorPaneView: NSView {
     let tabBar: TabBarView
+    /// Editor content (gutter + scroll view + text view). Always retained so
+    /// switching back from a terminal tab restores the same instance.
     let gutterContainer: GutterContainerView
+    /// Container that holds the currently visible content (either
+    /// gutterContainer for editor tabs or a TerminalView for terminal tabs).
+    private let contentArea: NSView
+    private weak var activeContent: NSView?
 
     init(tabBar: TabBarView, gutterContainer: GutterContainerView) {
         self.tabBar = tabBar
         self.gutterContainer = gutterContainer
+        self.contentArea = NSView()
         super.init(frame: .zero)
         tabBar.translatesAutoresizingMaskIntoConstraints = false
-        gutterContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentArea.translatesAutoresizingMaskIntoConstraints = false
         addSubview(tabBar)
-        addSubview(gutterContainer)
+        addSubview(contentArea)
         NSLayoutConstraint.activate([
             tabBar.topAnchor.constraint(equalTo: topAnchor),
             tabBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             tabBar.trailingAnchor.constraint(equalTo: trailingAnchor),
             tabBar.heightAnchor.constraint(equalToConstant: TabBarView.height),
-            gutterContainer.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
-            gutterContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            gutterContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
-            gutterContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentArea.topAnchor.constraint(equalTo: tabBar.bottomAnchor),
+            contentArea.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentArea.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentArea.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        setActiveContent(gutterContainer)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    /// Swap the visible content view. The previous one is detached but kept
+    /// alive by its owner (the Pane for editor content, the DocumentTab's
+    /// TerminalState for terminal content).
+    func setActiveContent(_ view: NSView) {
+        if activeContent === view { return }
+        activeContent?.removeFromSuperview()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        contentArea.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: contentArea.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+            view.topAnchor.constraint(equalTo: contentArea.topAnchor),
+            view.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+        ])
+        activeContent = view
+    }
 }

@@ -5,6 +5,7 @@ import AppKit
 let defaultSettingsYAML = """
 line_numbers: true
 split_orientation: vertical
+terminal_split_orientation: vertical
 
 theme:
   editor_background:  "#000000"
@@ -327,6 +328,13 @@ enum SettingsStore {
     /// stacked top/bottom — `.vertical` axis.
     static var splitOrientation: NSUserInterfaceLayoutOrientation = .horizontal
 
+    /// Default orientation used when Cmd+Shift+T (or right-click → New
+    /// Terminal) creates a new terminal pane. Same name convention as
+    /// `splitOrientation`: a "vertical" split has a vertical divider with
+    /// panes side-by-side (`.horizontal` axis); "horizontal" is panes
+    /// stacked top/bottom (`.vertical` axis).
+    static var terminalSplitOrientation: NSUserInterfaceLayoutOrientation = .horizontal
+
     static let defaultIndents: [String: IndentConfig] = [
         "ruby":       IndentConfig(style: .space, width: 2),
         "yaml":       IndentConfig(style: .space, width: 2),
@@ -379,7 +387,8 @@ enum SettingsStore {
             Theme.apply(language, colors)
         }
         showLineNumbers = parseTopLevelBool("line_numbers", in: text) ?? true
-        splitOrientation = parseSplitOrientation(in: text) ?? .horizontal
+        splitOrientation = parseOrientation(key: "split_orientation", in: text) ?? .horizontal
+        terminalSplitOrientation = parseOrientation(key: "terminal_split_orientation", in: text) ?? .horizontal
 
         var merged = defaultIndents
         for (lang, cfg) in parseIndent(text) {
@@ -534,9 +543,12 @@ enum SettingsStore {
         return (prefixLines + lines).joined(separator: "\n")
     }
 
-    /// Parse `split_orientation: vertical|horizontal`. Defaults to vertical.
-    static func parseSplitOrientation(in text: String) -> NSUserInterfaceLayoutOrientation? {
-        let prefix = "split_orientation:"
+    /// Parse a `<key>: vertical|horizontal` top-level entry. The user-facing
+    /// names describe the divider direction: "vertical" = vertical divider =
+    /// panes side-by-side = `.horizontal` layout axis; "horizontal" = stacked
+    /// top/bottom = `.vertical` axis.
+    static func parseOrientation(key: String, in text: String) -> NSUserInterfaceLayoutOrientation? {
+        let prefix = "\(key):"
         for rawLine in text.components(separatedBy: "\n") {
             var line = rawLine
             if let hash = line.firstIndex(of: "#") { line = String(line[..<hash]) }
@@ -548,8 +560,6 @@ enum SettingsStore {
                 .dropFirst(prefix.count)
                 .trimmingCharacters(in: .whitespaces)
                 .lowercased()
-            // Map user-facing names to layout axis: "vertical" = vertical
-            // divider = panes side-by-side = .horizontal axis.
             switch value {
             case "vertical":   return .horizontal
             case "horizontal": return .vertical

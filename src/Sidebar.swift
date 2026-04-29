@@ -483,7 +483,11 @@ final class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate,
         headerIcon.image = symbolImage(named: "chevron.down", pointSize: iconSize * 0.85)
         headerIconWidth.constant = iconSize
         headerIconHeight.constant = iconSize
-        headerHeight.constant = visible ? 32 : 0
+        // 31 (not the tab bar's full 32) because the headerContainer sits 1px
+        // below the sidebar's top to leave room for the gray top border. That
+        // makes the bottom divider land at the same y as the tab bar's bottom
+        // border, so the two lines read as one continuous horizontal divider.
+        headerHeight.constant = visible ? 31 : 0
     }
 
     /// One-time wiring of the divider + branch row subviews. Layout constraints

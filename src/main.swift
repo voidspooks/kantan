@@ -79,6 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                       keyEquivalent: "t")
         newSplitItem.target = editor
         fileMenu.addItem(newSplitItem)
+        let newTerminalSplitItem = NSMenuItem(title: "New Terminal Split",
+                                              action: #selector(Editor.newTerminalSplit(_:)),
+                                              keyEquivalent: "T")
+        newTerminalSplitItem.target = editor
+        newTerminalSplitItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(newTerminalSplitItem)
         let openItem = NSMenuItem(title: "Open…", action: #selector(Editor.openDocument(_:)), keyEquivalent: "o")
         openItem.target = editor
         fileMenu.addItem(openItem)
