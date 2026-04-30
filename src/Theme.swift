@@ -3,35 +3,57 @@ import AppKit
 // MARK: - Theme (dark mode only)
 
 enum Theme {
-    // Editor + sidebar backgrounds are var so they can be re-bound from settings.yaml
-    // (`theme:` block) without restarting the app.
+    // All UI colors are var so they can be re-bound from settings.yaml
+    // (named theme in the `themes:` block, plus the `theme:` overrides) without
+    // restarting the app.
     static var background = NSColor.black
     static var sidebarBackground = NSColor.black
 
-    static let foreground = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
-    static let cursor     = NSColor.white
-    static let selection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
-    static let selectionText = NSColor.white
+    static var foreground = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
+    static var cursor     = NSColor.white
+    static var selection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
+    static var selectionText = NSColor.white
     /// Subtle background drawn behind every visible occurrence of the word
     /// the caret is touching. Slightly lighter than `selection` so the two
     /// don't blur together when the user makes a real selection.
-    static let wordHighlight = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
+    static var wordHighlight = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
     /// Full-width bar drawn behind the line containing the caret. Darker than
     /// `wordHighlight` so the line bar reads as a subtle ambient hint while
     /// the word highlight stays the more prominent foreground accent.
-    static let lineHighlight = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
+    static var lineHighlight = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
 
-    static let gutterBackground = NSColor(red: 0.165, green: 0.165, blue: 0.180, alpha: 1.0)
-    static let gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
-    static let gutterBorder     = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
+    static var gutterBackground = NSColor(red: 0.165, green: 0.165, blue: 0.180, alpha: 1.0)
+    static var gutterText       = NSColor(red: 0.490, green: 0.490, blue: 0.510, alpha: 1.0)
+    static var gutterBorder     = NSColor(red: 0.235, green: 0.235, blue: 0.255, alpha: 1.0)
 
-    static let sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
+    static var sidebarText       = NSColor(red: 0.831, green: 0.831, blue: 0.831, alpha: 1.0)
 
     // Git status colors used by the sidebar to flag untracked / modified files.
     // Muted so the names still feel at home against the dark sidebar.
-    static let gitUntracked = NSColor(red: 0.49, green: 0.69, blue: 0.49, alpha: 1.0)
-    static let gitModified  = NSColor(red: 0.78, green: 0.69, blue: 0.42, alpha: 1.0)
-    static let sidebarSelection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
+    static var gitUntracked = NSColor(red: 0.49, green: 0.69, blue: 0.49, alpha: 1.0)
+    static var gitModified  = NSColor(red: 0.78, green: 0.69, blue: 0.42, alpha: 1.0)
+    static var sidebarSelection  = NSColor(red: 0.180, green: 0.180, blue: 0.200, alpha: 1.0)
+
+    /// Maps a named-theme palette (keys from settings.yaml's `themes:` block)
+    /// onto the corresponding `Theme.*` properties. Unknown keys are ignored,
+    /// missing keys leave the existing value untouched.
+    static func applyNamedTheme(_ palette: [String: NSColor]) {
+        if let c = palette["editor_background"]  { background = c }
+        if let c = palette["sidebar_background"] { sidebarBackground = c }
+        if let c = palette["foreground"]         { foreground = c }
+        if let c = palette["cursor"]             { cursor = c }
+        if let c = palette["selection"]          { selection = c }
+        if let c = palette["selection_text"]     { selectionText = c }
+        if let c = palette["word_highlight"]     { wordHighlight = c }
+        if let c = palette["line_highlight"]     { lineHighlight = c }
+        if let c = palette["gutter_background"]  { gutterBackground = c }
+        if let c = palette["gutter_text"]        { gutterText = c }
+        if let c = palette["gutter_border"]      { gutterBorder = c }
+        if let c = palette["sidebar_text"]       { sidebarText = c }
+        if let c = palette["sidebar_selection"]  { sidebarSelection = c }
+        if let c = palette["git_untracked"]      { gitUntracked = c }
+        if let c = palette["git_modified"]       { gitModified = c }
+    }
 
     // Token defaults shared across languages.
     private static let dKeyword  = NSColor(red: 0.776, green: 0.522, blue: 0.753, alpha: 1.0)

@@ -219,6 +219,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configItem.submenu = configMenu
         mainMenu.addItem(configItem)
 
+        // Themes menu — populated dynamically from settings.yaml's `themes:`
+        // block (with built-in defaults seeded by SettingsStore).
+        let themesItem = NSMenuItem()
+        let themesMenu = NSMenu(title: "Themes")
+        themesItem.submenu = themesMenu
+        editor.themesMenu = themesMenu
+        editor.rebuildThemesMenu()
+        mainMenu.addItem(themesItem)
+
         NSApp.mainMenu = mainMenu
     }
 }

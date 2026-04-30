@@ -6,10 +6,49 @@ let defaultSettingsYAML = """
 line_numbers: true
 split_orientation: vertical
 terminal_split_orientation: vertical
+active_theme: kantan_black
+
+themes:
+  kantan_black:
+    name:               "Kantan Black"
+    editor_background:  "#000000"
+    sidebar_background: "#000000"
+    foreground:         "#d4d4d4"
+    cursor:             "#ffffff"
+    selection:          "#2e2e33"
+    selection_text:     "#ffffff"
+    word_highlight:     "#3c3c41"
+    line_highlight:     "#1a1a1f"
+    gutter_background:  "#2a2a2e"
+    gutter_text:        "#7d7d82"
+    gutter_border:      "#3c3c41"
+    sidebar_text:       "#d4d4d4"
+    sidebar_selection:  "#2e2e33"
+    git_untracked:      "#7db07d"
+    git_modified:       "#c7b06b"
+  kantan_light:
+    name:               "Kantan Light"
+    editor_background:  "#ffffff"
+    sidebar_background: "#f5f5f5"
+    foreground:         "#1f1f1f"
+    cursor:             "#000000"
+    selection:          "#b8d7ff"
+    selection_text:     "#000000"
+    word_highlight:     "#d6e4ff"
+    line_highlight:     "#f4f4f5"
+    gutter_background:  "#f0f0f0"
+    gutter_text:        "#888888"
+    gutter_border:      "#d0d0d0"
+    sidebar_text:       "#1f1f1f"
+    sidebar_selection:  "#d8e4f8"
+    git_untracked:      "#2e8b2e"
+    git_modified:       "#b88b1b"
 
 theme:
   editor_background:  "#000000"
   sidebar_background: "#000000"
+  gutter_background:  "#2a2a2e"
+  gutter_text:        "#7d7d82"
 
 indent:
   ruby:
@@ -320,6 +359,62 @@ enum SettingsStore {
 
     static var showLineNumbers: Bool = true
 
+    /// Currently selected named theme (key under `themes:` in settings.yaml).
+    static var activeTheme: String = "kantan_black"
+
+    /// Parsed theme palettes, keyed by their YAML name. Includes built-in
+    /// defaults so the menu stays populated even if the user removed the
+    /// `themes:` block from settings.yaml.
+    static var themesByName: [String: [String: NSColor]] = [:]
+
+    /// Display titles for themes (e.g., "Kantan Black"). Falls back to a
+    /// title-cased version of the key when the YAML omits `name:`.
+    static var themeDisplayNames: [String: String] = [:]
+
+    /// Iteration order for the Themes menu — built-ins first, then user
+    /// additions in the order they appear in YAML.
+    static var themeOrder: [String] = []
+
+    /// Built-in default theme palettes. Seeded into `themesByName` before
+    /// parsing so the feature still works for existing users whose
+    /// settings.yaml predates the `themes:` block.
+    static let builtinThemes: [(key: String, name: String, palette: [String: String])] = [
+        ("kantan_black", "Kantan Black", [
+            "editor_background":  "#000000",
+            "sidebar_background": "#000000",
+            "foreground":         "#d4d4d4",
+            "cursor":             "#ffffff",
+            "selection":          "#2e2e33",
+            "selection_text":     "#ffffff",
+            "word_highlight":     "#3c3c41",
+            "line_highlight":     "#1a1a1f",
+            "gutter_background":  "#2a2a2e",
+            "gutter_text":        "#7d7d82",
+            "gutter_border":      "#3c3c41",
+            "sidebar_text":       "#d4d4d4",
+            "sidebar_selection":  "#2e2e33",
+            "git_untracked":      "#7db07d",
+            "git_modified":       "#c7b06b",
+        ]),
+        ("kantan_light", "Kantan Light", [
+            "editor_background":  "#ffffff",
+            "sidebar_background": "#f5f5f5",
+            "foreground":         "#1f1f1f",
+            "cursor":             "#000000",
+            "selection":          "#b8d7ff",
+            "selection_text":     "#000000",
+            "word_highlight":     "#d6e4ff",
+            "line_highlight":     "#f4f4f5",
+            "gutter_background":  "#f0f0f0",
+            "gutter_text":        "#888888",
+            "gutter_border":      "#d0d0d0",
+            "sidebar_text":       "#1f1f1f",
+            "sidebar_selection":  "#d8e4f8",
+            "git_untracked":      "#2e8b2e",
+            "git_modified":       "#b88b1b",
+        ]),
+    ]
+
     /// Default orientation used when Cmd+T creates a new split. The user-
     /// facing names match the divider direction: a "vertical" split has a
     /// vertical divider with panes side-by-side, which in
@@ -396,9 +491,60 @@ enum SettingsStore {
         }
         indentByLanguage = merged
 
+        // Seed built-in themes first, then layer parsed YAML themes over them.
+        // Built-ins keep the menu populated for users whose settings.yaml
+        // predates the `themes:` block.
+        var palettes: [String: [String: NSColor]] = [:]
+        var displayNames: [String: String] = [:]
+        var order: [String] = []
+        for builtin in builtinThemes {
+            var palette: [String: NSColor] = [:]
+            for (k, v) in builtin.palette {
+                if let c = parseHex(v) { palette[k] = c }
+            }
+            palettes[builtin.key] = palette
+            displayNames[builtin.key] = builtin.name
+            order.append(builtin.key)
+        }
+        let parsedThemes = parseThemes(text)
+        for key in parsedThemes.order {
+            if palettes[key] == nil { order.append(key) }
+            var existing = palettes[key] ?? [:]
+            if let p = parsedThemes.themes[key] {
+                for (k, v) in p { existing[k] = v }
+            }
+            palettes[key] = existing
+            if let name = parsedThemes.displayNames[key] {
+                displayNames[key] = name
+            } else if displayNames[key] == nil {
+                displayNames[key] = titleCase(key)
+            }
+        }
+        themesByName = palettes
+        themeDisplayNames = displayNames
+        themeOrder = order
+
+        let requested = parseTopLevelString("active_theme", in: text) ?? "kantan_black"
+        activeTheme = palettes[requested] != nil ? requested : "kantan_black"
+        if let palette = palettes[activeTheme] {
+            Theme.applyNamedTheme(palette)
+        }
+
+        // `theme:` layers user-overrides on top of the active named theme.
         let themeColors = parseTheme(text)
         if let c = themeColors["editor_background"]  { Theme.background = c }
         if let c = themeColors["sidebar_background"] { Theme.sidebarBackground = c }
+        if let c = themeColors["gutter_background"]  { Theme.gutterBackground = c }
+        if let c = themeColors["gutter_text"]        { Theme.gutterText = c }
+    }
+
+    /// Title-case a snake_case theme key for display when the YAML omits `name:`.
+    /// "kantan_black" -> "Kantan Black".
+    static func titleCase(_ key: String) -> String {
+        return key
+            .split(separator: "_")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 
     /// Parse the `theme:` block. Recognized keys (so far): `editor_background`,
@@ -500,6 +646,110 @@ enum SettingsStore {
         return result
     }
 
+    /// Parse the `themes:` block. Each theme is keyed by name; nested under
+    /// each theme are color keys (`editor_background`, `gutter_text`, etc.) as
+    /// `"#RRGGBB"` strings, plus an optional `name: "Display Name"`.
+    /// Returns the palettes plus display names plus their order of appearance.
+    static func parseThemes(_ text: String)
+        -> (themes: [String: [String: NSColor]], displayNames: [String: String], order: [String])
+    {
+        var themes: [String: [String: NSColor]] = [:]
+        var displayNames: [String: String] = [:]
+        var order: [String] = []
+        var inThemes = false
+        var currentTheme: String? = nil
+
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#"), hash != line.startIndex {
+                let beforeHash = line[..<hash]
+                if !beforeHash.contains("\"") {
+                    line = String(beforeHash)
+                }
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+
+            if indent == 0 {
+                inThemes = trimmed.hasPrefix("themes:")
+                currentTheme = nil
+                continue
+            }
+            if !inThemes { continue }
+            if indent == 2 {
+                if let colon = trimmed.firstIndex(of: ":") {
+                    let key = String(trimmed[..<colon]).trimmingCharacters(in: .whitespaces)
+                    currentTheme = key
+                    if themes[key] == nil {
+                        themes[key] = [:]
+                        order.append(key)
+                    }
+                }
+                continue
+            }
+            if indent >= 4, let theme = currentTheme {
+                guard let colon = trimmed.firstIndex(of: ":") else { continue }
+                let key = trimmed[..<colon].trimmingCharacters(in: .whitespaces)
+                var value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+                    value = String(value.dropFirst().dropLast())
+                }
+                if key == "name" {
+                    displayNames[theme] = String(value)
+                } else if let color = parseHex(String(value)) {
+                    var lookup = themes[theme] ?? [:]
+                    lookup[String(key)] = color
+                    themes[theme] = lookup
+                }
+            }
+        }
+        return (themes, displayNames, order)
+    }
+
+    /// Update the active theme and persist to settings.yaml. Caller is
+    /// responsible for triggering a UI refresh (loadAndApply + reapply).
+    static func setActiveTheme(_ name: String) {
+        activeTheme = name
+        let url = fileURL
+        let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let updated = rewriteTopLevelString("active_theme", value: name, in: existing)
+        do {
+            try updated.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            FileHandle.standardError.write(Data("Kantan: settings persist failed: \(error.localizedDescription)\n".utf8))
+        }
+    }
+
+    /// Replace an existing top-level `<key>: <value>` line, preserving any
+    /// trailing comment, or insert one near the top of the file if absent.
+    static func rewriteTopLevelString(_ key: String, value: String, in text: String) -> String {
+        let prefix = "\(key):"
+        let newLine = "\(key): \(value)"
+        var lines = text.components(separatedBy: "\n")
+        for i in 0..<lines.count {
+            let raw = lines[i]
+            var stripped = raw
+            if let hash = stripped.firstIndex(of: "#") {
+                stripped = String(stripped[..<hash])
+            }
+            let trimmed = stripped.trimmingCharacters(in: .whitespaces)
+            let indent = raw.prefix { $0 == " " }.count
+            guard indent == 0, trimmed.hasPrefix(prefix) else { continue }
+            if let hash = raw.firstIndex(of: "#") {
+                lines[i] = "\(newLine) \(raw[hash...])"
+            } else {
+                lines[i] = newLine
+            }
+            return lines.joined(separator: "\n")
+        }
+        var prefixLines = [newLine]
+        if let first = lines.first, !first.trimmingCharacters(in: .whitespaces).isEmpty {
+            prefixLines.append("")
+        }
+        return (prefixLines + lines).joined(separator: "\n")
+    }
+
     /// Update `showLineNumbers` and persist the new value to settings.yaml.
     /// Replaces an existing top-level `line_numbers:` line (preserving any trailing comment),
     /// or inserts one at the top of the file if absent.
@@ -565,6 +815,30 @@ enum SettingsStore {
             case "horizontal": return .vertical
             default:           return nil
             }
+        }
+        return nil
+    }
+
+    /// Read a top-level `key: <unquoted-string>` line. Returns nil if absent.
+    /// Strips surrounding double quotes if present.
+    static func parseTopLevelString(_ key: String, in text: String) -> String? {
+        let prefix = "\(key):"
+        for rawLine in text.components(separatedBy: "\n") {
+            var line = rawLine
+            if let hash = line.firstIndex(of: "#") {
+                line = String(line[..<hash])
+            }
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix { $0 == " " }.count
+            guard indent == 0, trimmed.hasPrefix(prefix) else { continue }
+            var value = trimmed
+                .dropFirst(prefix.count)
+                .trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("\"") && value.hasSuffix("\"") && value.count >= 2 {
+                value = String(value.dropFirst().dropLast())
+            }
+            return value.isEmpty ? nil : value
         }
         return nil
     }

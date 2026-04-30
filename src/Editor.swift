@@ -402,7 +402,10 @@ final class Pane: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
 
     func switchToTab(at index: Int, force: Bool = false) {
         guard index >= 0, index < tabs.count else { return }
-        if !force, activeTabIndex == index { return }
+        // No early-return on activeTabIndex == index: re-running the bind
+        // is idempotent and self-heals if the layout manager somehow
+        // detached from the tab's textStorage (rare, but observed).
+        _ = force
 
         if let active = activeTab, active.kind == .editor {
             active.selectedRange = textView.selectedRange()
@@ -1030,6 +1033,7 @@ final class Editor: NSObject, NSWindowDelegate {
     weak var syntaxHighlightingMenuItem: NSMenuItem?
     weak var lineNumbersMenuItem: NSMenuItem?
     weak var languageMenu: NSMenu?
+    weak var themesMenu: NSMenu?
 
     override init() {
         self.editorFont = Editor.makeFont(size: 13)
@@ -1173,10 +1177,12 @@ final class Editor: NSObject, NSWindowDelegate {
 
     private func openOrFocus(url: URL) {
         // If the URL is open in any pane already, focus that pane and tab.
+        // force=true so the LM/textStorage binding is re-applied even if the
+        // tab is already active — defensive against any stale state.
         for pane in panes {
             if let i = pane.tabs.firstIndex(where: { $0.url == url }) {
                 setFocusedPane(pane)
-                pane.switchToTab(at: i)
+                pane.switchToTab(at: i, force: true)
                 window.makeFirstResponder(pane.textView)
                 return
             }
@@ -1475,6 +1481,7 @@ final class Editor: NSObject, NSWindowDelegate {
                 for p in panes { p.reapplySyntaxColors() }
                 applyLineNumbersVisibility()
                 applyWorkspaceTheme()
+                rebuildThemesMenu()
             }
         } catch {
             showError("Couldn't save file: \(error.localizedDescription)")
@@ -1523,6 +1530,43 @@ final class Editor: NSObject, NSWindowDelegate {
         window.backgroundColor = Theme.background
         for pane in panes { pane.applyTheme() }
         workspaceView?.sidebar.applyTheme()
+    }
+
+    @objc func selectTheme(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        SettingsStore.setActiveTheme(name)
+        SettingsStore.loadAndApply()
+        for p in panes { p.reapplySyntaxColors() }
+        applyLineNumbersVisibility()
+        applyWorkspaceTheme()
+        refreshThemesMenuChecks()
+    }
+
+    /// Rebuild the Themes submenu items to reflect the current `themesByName`
+    /// map and active selection. Called after the menu is first built and
+    /// after settings.yaml changes (a user may have added/removed themes).
+    func rebuildThemesMenu() {
+        guard let menu = themesMenu else { return }
+        menu.removeAllItems()
+        for key in SettingsStore.themeOrder {
+            let title = SettingsStore.themeDisplayNames[key] ?? key
+            let item = NSMenuItem(title: title,
+                                  action: #selector(Editor.selectTheme(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = key
+            item.state = (key == SettingsStore.activeTheme) ? .on : .off
+            menu.addItem(item)
+        }
+    }
+
+    private func refreshThemesMenuChecks() {
+        guard let menu = themesMenu else { return }
+        for item in menu.items {
+            if let key = item.representedObject as? String {
+                item.state = (key == SettingsStore.activeTheme) ? .on : .off
+            }
+        }
     }
 
     private func applyLineNumbersVisibility() {
